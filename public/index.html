@@ -137,7 +137,7 @@
         <label class="field recurring-only">Ends <small>optional</small><input name="end_date" type="date"></label>
         <label class="field transaction-only">Date<input name="date" type="date"></label>
       </div>
-      <label class="field wide recurring-only expense-funding">Paid from<select name="funding_account" id="fundingAccount"><option value="checking">Checking</option></select><small class="field-help">Card charges add to debt but do not reduce checking until you schedule a card payment.</small></label>
+      <label class="field wide expense-funding">Paid from<select name="funding_account" id="fundingAccount"><option value="checking">Checking</option></select><small class="field-help">Purchases charged to a card increase that card’s projected balance without reducing Checking.</small></label>
       <label class="field wide expense-target">Payment destination<select name="payment_target" id="paymentTarget"><option value="none">Regular expense — no card balance reduction</option></select><small class="field-help">Choose a credit line when this is a card payment. The payment leaves Checking and reduces that card’s projected balance.</small></label>
       <label class="field wide">Note <small>optional</small><textarea name="note" rows="2" maxlength="500" placeholder="Anything useful to remember"></textarea></label>
       <label class="active-check recurring-only"><input type="checkbox" name="active" checked><span>Include this item in forecasts</span></label>

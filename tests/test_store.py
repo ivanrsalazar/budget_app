@@ -141,6 +141,27 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(recurring_after["destination_credit_line_id"])
         self.assertIsNone(transaction_after["destination_credit_line_id"])
 
+    def test_one_time_card_purchase_increases_debt_without_reducing_checking(self):
+        card = self.store.save_item("credit_lines", {"name": "Discover", "balance": 400})
+        purchase = self.store.save_item("transactions", {
+            "name": "Plane ticket", "kind": "expense", "amount": 350,
+            "date": "2026-11-12", "status": "planned",
+            "funding_source": "credit", "credit_line_id": card["id"],
+        })
+        self.assertEqual(purchase["funding_source"], "credit")
+        result = self.store.projection(date(2026, 11, 8), 1)
+        self.assertEqual(result["weeks"][0]["expenses"], 0)
+        self.assertEqual(result["weeks"][0]["card_charges"], 350)
+        self.assertEqual(result["ending_balance"], 1000)
+        self.assertEqual(result["credit_lines"][0]["projected_balance"], 750)
+        event = result["weeks"][0]["events"][0]
+        self.assertEqual(event["credit_line_name"], "Discover")
+
+        self.store.delete_item("credit_lines", card["id"])
+        updated = next(item for item in self.store.list_items("transactions") if item["id"] == purchase["id"])
+        self.assertEqual(updated["funding_source"], "checking")
+        self.assertIsNone(updated["credit_line_id"])
+
     def test_sample_import_is_idempotent(self):
         sample = Path(self.temp.name) / "sample.csv"
         sample.write_text(",Nov 5th,,Nov 12th\n,389,,1343\nExpenses,,Expenses,\nRent,/500,Food,100\nexpense subtotal,500,expense subtotal,100\nLeft,111,Left,1243\n", encoding="utf-8")

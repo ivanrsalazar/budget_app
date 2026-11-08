@@ -120,7 +120,7 @@ function updateFundingField() {
   const expense = form.elements.kind.value === 'expense';
   const hasTarget = form.elements.payment_target.value !== 'none';
   $$('.expense-target', form).forEach(el => el.classList.toggle('hidden', !expense));
-  $$('.expense-funding', form).forEach(el => el.classList.toggle('hidden', !(form.elements.item_type.value === 'recurring' && expense && !hasTarget)));
+  $$('.expense-funding', form).forEach(el => el.classList.toggle('hidden', !(expense && !hasTarget)));
   if (hasTarget) form.elements.funding_account.value = 'checking';
 }
 
@@ -205,11 +205,9 @@ async function saveItem(event) {
   data.active = form.elements.active.checked;
   const target = data.payment_target || 'none';
   data.destination_credit_line_id = target.startsWith('credit:') ? Number(target.split(':')[1]) : null;
-  if (type === 'recurring') {
-    const funding = data.destination_credit_line_id ? 'checking' : data.funding_account || 'checking';
-    data.funding_source = funding.startsWith('credit:') ? 'credit' : 'checking';
-    data.credit_line_id = funding.startsWith('credit:') ? Number(funding.split(':')[1]) : null;
-  }
+  const funding = data.destination_credit_line_id ? 'checking' : data.funding_account || 'checking';
+  data.funding_source = funding.startsWith('credit:') ? 'credit' : 'checking';
+  data.credit_line_id = funding.startsWith('credit:') ? Number(funding.split(':')[1]) : null;
   const route = type === 'recurring' ? 'recurring' : 'transactions';
   try {
     await api(`/api/${route}${data.id ? `/${data.id}` : ''}`, { method: data.id ? 'PUT' : 'POST', body: JSON.stringify(data) });

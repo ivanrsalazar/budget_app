@@ -32,6 +32,7 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('id="calendarGrid"', markup)
         self.assertIn('id="creditForm"', markup)
         self.assertIn('name="funding_account"', markup)
+        self.assertIn('class="field wide expense-funding"', markup)
         self.assertIn('name="payment_target"', markup)
 
     def test_calendar_renders_daily_running_checking_balance(self):

@@ -160,6 +160,8 @@ class Store:
                     note TEXT NOT NULL DEFAULT '',
                     source TEXT NOT NULL DEFAULT 'manual',
                     source_key TEXT UNIQUE,
+                    funding_source TEXT NOT NULL DEFAULT 'checking',
+                    credit_line_id INTEGER REFERENCES credit_lines(id) ON DELETE SET NULL,
                     destination_credit_line_id INTEGER REFERENCES credit_lines(id) ON DELETE SET NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
@@ -190,6 +192,10 @@ class Store:
             if "destination_credit_line_id" not in recurring_columns:
                 db.execute("ALTER TABLE recurring_items ADD COLUMN destination_credit_line_id INTEGER")
             transaction_columns = {row["name"] for row in db.execute("PRAGMA table_info(transactions)")}
+            if "funding_source" not in transaction_columns:
+                db.execute("ALTER TABLE transactions ADD COLUMN funding_source TEXT NOT NULL DEFAULT 'checking'")
+            if "credit_line_id" not in transaction_columns:
+                db.execute("ALTER TABLE transactions ADD COLUMN credit_line_id INTEGER")
             if "destination_credit_line_id" not in transaction_columns:
                 db.execute("ALTER TABLE transactions ADD COLUMN destination_credit_line_id INTEGER")
             defaults = {
@@ -277,6 +283,17 @@ class Store:
             fields = list(values)
         elif table == "transactions":
             kind = validate_choice(payload.get("kind"), {"income", "expense"}, "kind")
+            funding_source = validate_choice(payload.get("funding_source", "checking"), {"checking", "credit"}, "funding source")
+            credit_line_id = parse_optional_id(payload.get("credit_line_id")) if funding_source == "credit" else None
+            destination_credit_line_id = parse_optional_id(payload.get("destination_credit_line_id")) if kind == "expense" else None
+            if kind == "income":
+                funding_source = "checking"
+                credit_line_id = None
+            elif destination_credit_line_id is not None:
+                funding_source = "checking"
+                credit_line_id = None
+            if funding_source == "credit" and credit_line_id is None:
+                raise ValueError("Choose a credit line for this expense")
             values = {
                 "name": clean_name(payload.get("name")),
                 "kind": kind,
@@ -286,7 +303,9 @@ class Store:
                 "note": str(payload.get("note", "")).strip()[:500],
                 "source": "manual",
                 "source_key": None,
-                "destination_credit_line_id": parse_optional_id(payload.get("destination_credit_line_id")) if kind == "expense" else None,
+                "funding_source": funding_source,
+                "credit_line_id": credit_line_id,
+                "destination_credit_line_id": destination_credit_line_id,
             }
             fields = list(values)
         elif table == "credit_lines":
@@ -304,7 +323,7 @@ class Store:
             raise ValueError("Invalid item type")
 
         with self.connect() as db:
-            if table == "recurring_items" and values["funding_source"] == "credit":
+            if table in {"recurring_items", "transactions"} and values["funding_source"] == "credit":
                 linked = db.execute("SELECT id FROM credit_lines WHERE id = ?", (values["credit_line_id"],)).fetchone()
                 if not linked:
                     raise ValueError("The selected credit line no longer exists")
@@ -351,8 +370,12 @@ class Store:
                     (item_id, item_id, item_id, item_id, item_id),
                 )
                 db.execute(
-                    "UPDATE transactions SET destination_credit_line_id = NULL WHERE destination_credit_line_id = ?",
-                    (item_id,),
+                    """UPDATE transactions
+                       SET funding_source = CASE WHEN credit_line_id = ? THEN 'checking' ELSE funding_source END,
+                           credit_line_id = CASE WHEN credit_line_id = ? THEN NULL ELSE credit_line_id END,
+                           destination_credit_line_id = CASE WHEN destination_credit_line_id = ? THEN NULL ELSE destination_credit_line_id END
+                       WHERE credit_line_id = ? OR destination_credit_line_id = ?""",
+                    (item_id, item_id, item_id, item_id, item_id),
                 )
             cursor = db.execute(f"DELETE FROM {table} WHERE id = ?", (item_id,))
             if cursor.rowcount == 0:
@@ -375,8 +398,10 @@ class Store:
             ).fetchall()
             credit_lines = [dict(row) for row in db.execute("SELECT * FROM credit_lines ORDER BY name")]
             transactions = db.execute(
-                """SELECT transactions.*, target_card.name AS destination_credit_line_name
+                """SELECT transactions.*, source_card.name AS credit_line_name,
+                          target_card.name AS destination_credit_line_name
                    FROM transactions
+                   LEFT JOIN credit_lines AS source_card ON source_card.id = transactions.credit_line_id
                    LEFT JOIN credit_lines AS target_card ON target_card.id = transactions.destination_credit_line_id
                    WHERE date BETWEEN ? AND ? ORDER BY date, transactions.id""",
                 (start.isoformat(), end.isoformat()),
@@ -612,9 +637,9 @@ def validate_optional_int(value: object, choices: Iterable[int], field: str) -> 
 def event_from_row(row: sqlite3.Row, day: date, source: str) -> dict:
     amount = money(row["amount"])
     kind = row["kind"]
-    funding_source = row["funding_source"] if source == "recurring" else "checking"
-    credit_line_id = row["credit_line_id"] if source == "recurring" else None
-    credit_line_name = row["credit_line_name"] if source == "recurring" else None
+    funding_source = row["funding_source"]
+    credit_line_id = row["credit_line_id"]
+    credit_line_name = row["credit_line_name"]
     destination_credit_line_id = row["destination_credit_line_id"]
     destination_credit_line_name = row["destination_credit_line_name"]
     cash_effect = kind == "income" or funding_source == "checking"

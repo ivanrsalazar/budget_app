@@ -22,7 +22,7 @@ On the first run, if `resources/Finances - Winter '26_'27.csv` exists, its dated
 - See a 12-week running cash-flow forecast and the lowest projected balance.
 - Browse a monthly calendar of recurring and one-time activity with projected end-of-day Checking balances.
 - Track credit-card balances, limits, APRs, due days, and minimum payments.
-- Assign recurring expenses to Checking or a saved credit line.
+- Assign recurring or one-time expenses to Checking or a saved credit line.
 - Direct one-time or recurring card payments to a saved credit line to reduce its projected debt.
 - See exactly how much remains immediately before the next expected income.
 - Edit, pause, or delete recurring rules and one-time items.
