@@ -62,6 +62,51 @@ def occurrences_between(start: date, frequency: str, window_start: date, window_
         current = add_months(start, index * month_step)
 
 
+def nth_weekday_of_month(year: int, month: int, weekday: int, ordinal: int) -> date:
+    """Return an nth weekday; ordinal -1 means the last weekday of the month."""
+    if weekday not in range(7) or ordinal not in {-1, 1, 2, 3, 4}:
+        raise ValueError("Invalid weekday schedule")
+    if ordinal == -1:
+        last = date(year, month, calendar.monthrange(year, month)[1])
+        return last - timedelta(days=(last.weekday() - weekday) % 7)
+    first = date(year, month, 1)
+    return first + timedelta(days=(weekday - first.weekday()) % 7 + (ordinal - 1) * 7)
+
+
+def scheduled_occurrences(
+    start: date,
+    frequency: str,
+    schedule_type: str,
+    weekday: int | None,
+    ordinal: int | None,
+    window_start: date,
+    window_end: date,
+) -> Iterable[date]:
+    effective_start = max(start, window_start)
+    if schedule_type == "interval":
+        yield from occurrences_between(start, frequency, window_start, window_end)
+        return
+    if weekday is None or weekday not in range(7):
+        raise ValueError("A weekday is required for this schedule")
+    if schedule_type == "weekday":
+        current = effective_start + timedelta(days=(weekday - effective_start.weekday()) % 7)
+        while current <= window_end:
+            yield current
+            current += timedelta(days=7)
+        return
+    if schedule_type == "nth_weekday":
+        if ordinal not in {-1, 1, 2, 3, 4}:
+            raise ValueError("An ordinal week is required for this schedule")
+        month_cursor = date(effective_start.year, effective_start.month, 1)
+        while month_cursor <= window_end:
+            occurrence = nth_weekday_of_month(month_cursor.year, month_cursor.month, weekday, ordinal)
+            if effective_start <= occurrence <= window_end:
+                yield occurrence
+            month_cursor = add_months(month_cursor, 1)
+        return
+    raise ValueError("Invalid schedule type")
+
+
 @dataclass
 class Store:
     path: Path
@@ -93,6 +138,9 @@ class Store:
                     kind TEXT NOT NULL CHECK(kind IN ('income', 'expense')),
                     amount REAL NOT NULL CHECK(amount >= 0),
                     frequency TEXT NOT NULL CHECK(frequency IN ('weekly', 'biweekly', 'monthly', 'quarterly', 'yearly')),
+                    schedule_type TEXT NOT NULL DEFAULT 'interval',
+                    weekday INTEGER,
+                    ordinal INTEGER,
                     start_date TEXT NOT NULL,
                     end_date TEXT,
                     active INTEGER NOT NULL DEFAULT 1,
@@ -113,6 +161,13 @@ class Store:
                 );
                 """
             )
+            recurring_columns = {row["name"] for row in db.execute("PRAGMA table_info(recurring_items)")}
+            if "schedule_type" not in recurring_columns:
+                db.execute("ALTER TABLE recurring_items ADD COLUMN schedule_type TEXT NOT NULL DEFAULT 'interval'")
+            if "weekday" not in recurring_columns:
+                db.execute("ALTER TABLE recurring_items ADD COLUMN weekday INTEGER")
+            if "ordinal" not in recurring_columns:
+                db.execute("ALTER TABLE recurring_items ADD COLUMN ordinal INTEGER")
             defaults = {
                 "current_balance": "0",
                 "balance_as_of": iso_today(),
@@ -150,11 +205,30 @@ class Store:
 
     def save_item(self, table: str, payload: dict, item_id: int | None = None) -> dict:
         if table == "recurring_items":
+            schedule_type = validate_choice(
+                payload.get("schedule_type", "interval"),
+                {"interval", "weekday", "nth_weekday"},
+                "schedule type",
+            )
+            weekday = validate_optional_int(payload.get("weekday"), range(7), "weekday") if schedule_type != "interval" else None
+            ordinal = validate_optional_int(payload.get("ordinal"), {-1, 1, 2, 3, 4}, "ordinal") if schedule_type == "nth_weekday" else None
+            if schedule_type != "interval" and weekday is None:
+                raise ValueError("A weekday is required for this schedule")
+            if schedule_type == "nth_weekday" and ordinal is None:
+                raise ValueError("An ordinal week is required for this schedule")
+            frequency = payload.get("frequency", "monthly")
+            if schedule_type == "weekday":
+                frequency = "weekly"
+            elif schedule_type == "nth_weekday":
+                frequency = "monthly"
             values = {
                 "name": clean_name(payload.get("name")),
                 "kind": validate_choice(payload.get("kind"), {"income", "expense"}, "kind"),
                 "amount": validate_amount(payload.get("amount")),
-                "frequency": validate_choice(payload.get("frequency"), {"weekly", "biweekly", "monthly", "quarterly", "yearly"}, "frequency"),
+                "frequency": validate_choice(frequency, {"weekly", "biweekly", "monthly", "quarterly", "yearly"}, "frequency"),
+                "schedule_type": schedule_type,
+                "weekday": weekday,
+                "ordinal": ordinal,
                 "start_date": parse_date(payload.get("start_date", "")).isoformat(),
                 "end_date": parse_date(payload["end_date"]).isoformat() if payload.get("end_date") else None,
                 "active": 1 if payload.get("active", True) else 0,
@@ -221,7 +295,15 @@ class Store:
             item_end = min(end, parse_date(row["end_date"])) if row["end_date"] else end
             if item_end < start:
                 continue
-            for occurrence in occurrences_between(item_start, row["frequency"], start, item_end):
+            for occurrence in scheduled_occurrences(
+                item_start,
+                row["frequency"],
+                row["schedule_type"],
+                row["weekday"],
+                row["ordinal"],
+                start,
+                item_end,
+            ):
                 events.append(event_from_row(row, occurrence, "recurring"))
 
         for row in transactions:
@@ -371,6 +453,18 @@ def validate_amount(value: object) -> float:
     if amount <= 0 or amount > 100_000_000:
         raise ValueError("Amount must be greater than zero")
     return amount
+
+
+def validate_optional_int(value: object, choices: Iterable[int], field: str) -> int | None:
+    if value in {None, ""}:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid {field}") from exc
+    if parsed not in choices:
+        raise ValueError(f"Invalid {field}")
+    return parsed
 
 
 def event_from_row(row: sqlite3.Row, day: date, source: str) -> dict:

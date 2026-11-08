@@ -26,6 +26,21 @@ function asUTC(value) { return new Date(`${value}T00:00:00Z`); }
 function escapeHTML(value) { const el = document.createElement('div'); el.textContent = String(value ?? ''); return el.innerHTML; }
 function signed(value, kind) { return `${kind === 'income' ? '+' : '−'}${money.format(value)}`; }
 function frequencyLabel(value) { return ({ weekly: 'Weekly', biweekly: 'Every 2 weeks', monthly: 'Monthly', quarterly: 'Every 3 months', yearly: 'Yearly' })[value] || value; }
+const weekdayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const ordinalNames = { 1: 'First', 2: 'Second', 3: 'Third', 4: 'Fourth', '-1': 'Last' };
+function scheduleLabel(item) {
+  if (item.schedule_type === 'weekday') return `Every ${weekdayNames[item.weekday]}`;
+  if (item.schedule_type === 'nth_weekday') return `${ordinalNames[item.ordinal]} ${weekdayNames[item.weekday]} monthly`;
+  return frequencyLabel(item.frequency);
+}
+
+function updateScheduleFields() {
+  const form = $('#itemForm');
+  const type = form.elements.schedule_type.value;
+  $$('.schedule-interval', form).forEach(el => el.classList.toggle('hidden', type !== 'interval'));
+  $$('.schedule-weekday', form).forEach(el => el.classList.toggle('hidden', !['weekday', 'nth_weekday'].includes(type)));
+  $$('.schedule-nth', form).forEach(el => el.classList.toggle('hidden', type !== 'nth_weekday'));
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
@@ -96,7 +111,7 @@ function renderLists() {
 function renderPlanItems(items, type) {
   if (!items.length) return '<div class="empty-state">Nothing here yet. Add an item to begin.</div>';
   return items.map(item => {
-    const meta = type === 'recurring' ? `${frequencyLabel(item.frequency)} · starts ${shortDate.format(asUTC(item.start_date))}${item.active ? '' : ' · paused'}` : `${longDate.format(asUTC(item.date))} · ${item.status}`;
+    const meta = type === 'recurring' ? `${scheduleLabel(item)} · starts ${shortDate.format(asUTC(item.start_date))}${item.active ? '' : ' · paused'}` : `${longDate.format(asUTC(item.date))} · ${item.status}`;
     return `<article class="plan-item ${item.active === 0 ? 'inactive' : ''}">
       <div><div class="plan-item-name">${escapeHTML(item.name)}</div><div class="plan-item-meta">${meta}</div></div>
       ${type === 'transaction' ? `<div class="plan-item-meta">${escapeHTML(item.note || item.source.replace('_', ' '))}</div>` : ''}
@@ -133,10 +148,12 @@ function openItemDialog(type, item = null) {
     form.elements.kind.value = 'expense';
     form.elements.start_date.value = today;
     form.elements.date.value = today;
+    form.elements.schedule_type.value = 'interval';
     form.elements.frequency.value = 'monthly';
     form.elements.status.value = 'planned';
     form.elements.active.checked = true;
   }
+  updateScheduleFields();
   $('#itemDialog').showModal();
 }
 
@@ -211,6 +228,7 @@ $('#themeToggle').addEventListener('click', () => applyTheme(document.documentEl
 $('#quickAdd').addEventListener('click', () => openItemDialog(state.view === 'one-time' ? 'transaction' : 'recurring'));
 $('#adjustBalance').addEventListener('click', openBalanceDialog);
 $('#forecastStart').addEventListener('change', () => loadProjection().catch(error => toast(error.message, true)));
+$('#scheduleType').addEventListener('change', updateScheduleFields);
 $('#itemForm').addEventListener('submit', saveItem);
 $('#balanceForm').addEventListener('submit', saveBalance);
 applyTheme(document.documentElement.dataset.theme);

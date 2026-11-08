@@ -102,8 +102,13 @@
       <label class="field wide">Name<input name="name" required maxlength="100" placeholder="e.g. Paycheck or Rent"></label>
       <div class="field-row">
         <label class="field">Amount<span class="money-input"><b>$</b><input name="amount" type="number" min="0.01" step="0.01" required placeholder="0.00"></span></label>
-        <label class="field recurring-only">Repeats<select name="frequency"><option value="weekly">Every week</option><option value="biweekly">Every 2 weeks</option><option value="monthly" selected>Every month</option><option value="quarterly">Every 3 months</option><option value="yearly">Every year</option></select></label>
+        <label class="field recurring-only">Schedule<select name="schedule_type" id="scheduleType"><option value="interval">Fixed interval</option><option value="weekday">Every selected weekday</option><option value="nth_weekday">Nth weekday of each month</option></select></label>
         <label class="field transaction-only">Status<select name="status"><option value="planned">Planned</option><option value="posted">Posted</option></select></label>
+      </div>
+      <div class="field-row recurring-only schedule-details">
+        <label class="field schedule-interval">Repeats<select name="frequency"><option value="weekly">Every week</option><option value="biweekly">Every 2 weeks</option><option value="monthly" selected>Every month</option><option value="quarterly">Every 3 months</option><option value="yearly">Every year</option></select></label>
+        <label class="field schedule-weekday">Day of week<select name="weekday"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3" selected>Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select></label>
+        <label class="field schedule-nth">Week of month<select name="ordinal"><option value="1">First</option><option value="2">Second</option><option value="3" selected>Third</option><option value="4">Fourth</option><option value="-1">Last</option></select></label>
       </div>
       <div class="field-row">
         <label class="field recurring-only">Starts<input name="start_date" type="date"></label>

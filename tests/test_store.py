@@ -3,7 +3,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from budget.store import Store, add_months, occurrences_between
+from budget.store import Store, nth_weekday_of_month, occurrences_between, scheduled_occurrences
 
 
 class RecurrenceTests(unittest.TestCase):
@@ -14,6 +14,23 @@ class RecurrenceTests(unittest.TestCase):
     def test_biweekly_skips_to_window(self):
         dates = list(occurrences_between(date(2026, 1, 2), "biweekly", date(2026, 2, 1), date(2026, 2, 28)))
         self.assertEqual(dates, [date(2026, 2, 13), date(2026, 2, 27)])
+
+    def test_every_thursday_schedule(self):
+        dates = list(scheduled_occurrences(
+            date(2026, 11, 8), "weekly", "weekday", 3, None,
+            date(2026, 11, 8), date(2026, 11, 30),
+        ))
+        self.assertEqual(dates, [date(2026, 11, 12), date(2026, 11, 19), date(2026, 11, 26)])
+
+    def test_third_thursday_schedule(self):
+        dates = list(scheduled_occurrences(
+            date(2026, 11, 1), "monthly", "nth_weekday", 3, 3,
+            date(2026, 11, 1), date(2027, 1, 31),
+        ))
+        self.assertEqual(dates, [date(2026, 11, 19), date(2026, 12, 17), date(2027, 1, 21)])
+
+    def test_last_weekday_schedule(self):
+        self.assertEqual(nth_weekday_of_month(2027, 2, 3, -1), date(2027, 2, 25))
 
 
 class StoreTests(unittest.TestCase):
@@ -60,6 +77,17 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(result["ending_balance"], 1000)
         self.store.delete_item("recurring_items", item["id"])
         self.assertEqual(self.store.list_items("recurring_items"), [])
+
+    def test_nth_weekday_item_projects_on_requested_day(self):
+        item = self.store.save_item("recurring_items", {
+            "name": "Rent", "kind": "expense", "amount": 1600,
+            "schedule_type": "nth_weekday", "weekday": 3, "ordinal": 3,
+            "start_date": "2026-11-01", "active": True,
+        })
+        self.assertEqual(item["frequency"], "monthly")
+        result = self.store.projection(date(2026, 11, 1), 8)
+        rent_dates = [event["date"] for week in result["weeks"] for event in week["events"]]
+        self.assertEqual(rent_dates, ["2026-11-19", "2026-12-17"])
 
     def test_sample_import_is_idempotent(self):
         sample = Path(self.temp.name) / "sample.csv"

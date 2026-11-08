@@ -17,7 +17,7 @@ On the first run, if `resources/Finances - Winter '26_'27.csv` exists, its dated
 ## Features
 
 - Set a current cash balance and an “as of” date.
-- Add recurring income and expenses weekly, every two weeks, monthly, quarterly, or yearly.
+- Add recurring income and expenses by interval, every selected weekday, or an ordinal weekday such as the third Thursday of each month.
 - Add one-time planned or posted items.
 - See a 12-week running cash-flow forecast and the lowest projected balance.
 - See exactly how much remains immediately before the next expected income.
