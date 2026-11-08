@@ -1,0 +1,29 @@
+# Private financial source files
+resources/*.csv
+resources/*.xlsx
+resources/*.xls
+
+# Local persistent data
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+
+# Environment and editor files
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
+

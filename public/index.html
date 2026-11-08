@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10271f">
+  <meta name="description" content="A local-first week-by-week cash flow planner.">
+  <title>TrueNorth Budget</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="TrueNorth home">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span>TrueNorth</span>
+      </a>
+      <nav class="tabs" aria-label="Budget sections">
+        <button class="tab active" data-view="forecast">Forecast</button>
+        <button class="tab" data-view="plan">Recurring plan</button>
+        <button class="tab" data-view="one-time">One-time</button>
+      </nav>
+      <button class="button button-primary compact" id="quickAdd">+ Add item</button>
+    </header>
+
+    <main id="top">
+      <section class="hero view" data-view-panel="forecast">
+        <div>
+          <p class="eyebrow">YOUR CASH FLOW COMPASS</p>
+          <h1>Know what’s truly<br><em>yours to spend.</em></h1>
+          <p class="hero-copy">A week-by-week view of what’s coming in, what’s going out, and what remains before your next payday.</p>
+        </div>
+        <div class="hero-actions">
+          <label class="date-control">Forecast from
+            <input type="date" id="forecastStart">
+          </label>
+          <button class="button button-ghost" id="adjustBalance">Adjust balance</button>
+        </div>
+      </section>
+
+      <section class="view" data-view-panel="forecast">
+        <div class="metrics" id="metrics" aria-live="polite">
+          <article class="metric-card metric-featured skeleton"></article>
+          <article class="metric-card skeleton"></article>
+          <article class="metric-card skeleton"></article>
+          <article class="metric-card skeleton"></article>
+        </div>
+
+        <div class="section-heading forecast-heading">
+          <div>
+            <p class="eyebrow">THE ROAD AHEAD</p>
+            <h2>12-week outlook</h2>
+          </div>
+          <div class="legend" aria-label="Forecast legend">
+            <span><i class="dot income"></i>Money in</span>
+            <span><i class="dot expense"></i>Money out</span>
+          </div>
+        </div>
+        <div class="week-list" id="weekList" aria-live="polite"></div>
+      </section>
+
+      <section class="view hidden" data-view-panel="plan">
+        <div class="page-heading">
+          <div><p class="eyebrow">YOUR RHYTHM</p><h1>Recurring plan</h1><p>Paychecks, rent, subscriptions, and everything else that repeats.</p></div>
+          <button class="button button-primary" data-add-type="recurring">+ Add recurring item</button>
+        </div>
+        <div class="split-lists">
+          <section><div class="list-title"><h2>Income</h2><span id="incomeCount"></span></div><div class="item-list" id="incomeList"></div></section>
+          <section><div class="list-title"><h2>Expenses</h2><span id="expenseCount"></span></div><div class="item-list" id="expenseList"></div></section>
+        </div>
+      </section>
+
+      <section class="view hidden" data-view-panel="one-time">
+        <div class="page-heading">
+          <div><p class="eyebrow">THE EXCEPTIONS</p><h1>One-time items</h1><p>Planned purchases, surprise bills, bonuses, and transfers.</p></div>
+          <button class="button button-primary" data-add-type="transaction">+ Add one-time item</button>
+        </div>
+        <div class="item-list full-list" id="transactionList"></div>
+      </section>
+    </main>
+
+    <footer><span>TrueNorth Budget</span><span>Stored privately on this device</span></footer>
+  </div>
+
+  <dialog id="itemDialog">
+    <form method="dialog" id="itemForm">
+      <div class="dialog-head">
+        <div><p class="eyebrow" id="dialogEyebrow">NEW PLAN ITEM</p><h2 id="dialogTitle">Add recurring item</h2></div>
+        <button class="icon-button" value="cancel" aria-label="Close">×</button>
+      </div>
+      <input type="hidden" name="id">
+      <input type="hidden" name="item_type">
+      <div class="type-toggle" role="group" aria-label="Money direction">
+        <label><input type="radio" name="kind" value="income"><span>↓ Money in</span></label>
+        <label><input type="radio" name="kind" value="expense" checked><span>↑ Money out</span></label>
+      </div>
+      <label class="field wide">Name<input name="name" required maxlength="100" placeholder="e.g. Paycheck or Rent"></label>
+      <div class="field-row">
+        <label class="field">Amount<span class="money-input"><b>$</b><input name="amount" type="number" min="0.01" step="0.01" required placeholder="0.00"></span></label>
+        <label class="field recurring-only">Repeats<select name="frequency"><option value="weekly">Every week</option><option value="biweekly">Every 2 weeks</option><option value="monthly" selected>Every month</option><option value="quarterly">Every 3 months</option><option value="yearly">Every year</option></select></label>
+        <label class="field transaction-only">Status<select name="status"><option value="planned">Planned</option><option value="posted">Posted</option></select></label>
+      </div>
+      <div class="field-row">
+        <label class="field recurring-only">Starts<input name="start_date" type="date"></label>
+        <label class="field recurring-only">Ends <small>optional</small><input name="end_date" type="date"></label>
+        <label class="field transaction-only">Date<input name="date" type="date"></label>
+      </div>
+      <label class="field wide">Note <small>optional</small><textarea name="note" rows="2" maxlength="500" placeholder="Anything useful to remember"></textarea></label>
+      <label class="active-check recurring-only"><input type="checkbox" name="active" checked><span>Include this item in forecasts</span></label>
+      <div class="dialog-actions"><button class="button button-ghost" value="cancel">Cancel</button><button class="button button-primary" type="submit" value="default">Save item</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="balanceDialog">
+    <form method="dialog" id="balanceForm">
+      <div class="dialog-head"><div><p class="eyebrow">STARTING POINT</p><h2>Adjust current balance</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <p class="dialog-copy">Use the total cash you can actually spend across the accounts you want this plan to cover.</p>
+      <label class="field wide">Available now<span class="money-input large"><b>$</b><input name="current_balance" type="number" step="0.01" required></span></label>
+      <label class="field wide">Balance accurate as of<input name="balance_as_of" type="date" required></label>
+      <div class="dialog-actions"><button class="button button-ghost" value="cancel">Cancel</button><button class="button button-primary" type="submit" value="default">Update forecast</button></div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
+
