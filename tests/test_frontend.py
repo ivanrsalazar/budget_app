@@ -34,6 +34,14 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('name="funding_account"', markup)
         self.assertIn('name="payment_target"', markup)
 
+    def test_calendar_renders_daily_running_checking_balance(self):
+        script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("state.calendarBalanceProjection.starting_balance", script)
+        self.assertIn("event.signed_amount", script)
+        self.assertIn('class="day-balance', script)
+        self.assertIn(".day-balance", styles)
+
     def test_item_actions_use_visible_menu_instead_of_typed_prompt(self):
         script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
         styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")

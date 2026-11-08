@@ -1,7 +1,8 @@
-const state = { settings: null, recurring: [], transactions: [], credit_lines: [], projection: null, calendarProjection: null, calendarDate: null, view: 'forecast' };
+const state = { settings: null, recurring: [], transactions: [], credit_lines: [], projection: null, calendarProjection: null, calendarBalanceProjection: null, calendarDate: null, view: 'forecast' };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const compactMoney = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const shortDate = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const longDate = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' });
@@ -232,7 +233,14 @@ async function loadCalendar() {
   const month = state.calendarDate;
   const first = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1));
   const gridStart = new Date(first); gridStart.setUTCDate(1 - first.getUTCDay());
-  state.calendarProjection = await api(`/api/projection?start=${isoUTC(gridStart)}&weeks=6`);
+  const gridEnd = new Date(gridStart); gridEnd.setUTCDate(gridStart.getUTCDate() + 41);
+  const balanceStart = asUTC(state.settings.balance_as_of);
+  const balanceDays = Math.floor((gridEnd - balanceStart) / 86400000) + 1;
+  const gridRequest = api(`/api/projection?start=${isoUTC(gridStart)}&weeks=6`);
+  const balanceRequest = balanceDays > 0 && balanceDays <= 364
+    ? api(`/api/projection?start=${isoUTC(balanceStart)}&weeks=${Math.ceil(balanceDays / 7)}`)
+    : Promise.resolve(null);
+  [state.calendarProjection, state.calendarBalanceProjection] = await Promise.all([gridRequest, balanceRequest]);
   renderCalendar(gridStart);
 }
 
@@ -241,6 +249,20 @@ function renderCalendar(gridStart) {
   $('#calendarMonth').textContent = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(month);
   const eventsByDate = {};
   state.calendarProjection.weeks.flatMap(week => week.events).forEach(event => (eventsByDate[event.date] ||= []).push(event));
+  const balancesByDate = {};
+  if (state.calendarBalanceProjection) {
+    const balanceEvents = {};
+    state.calendarBalanceProjection.weeks.flatMap(week => week.events).forEach(event => (balanceEvents[event.date] ||= []).push(event));
+    let runningChecking = state.calendarBalanceProjection.starting_balance;
+    const cursor = asUTC(state.calendarBalanceProjection.start);
+    const gridEnd = new Date(gridStart); gridEnd.setUTCDate(gridStart.getUTCDate() + 41);
+    while (cursor <= gridEnd) {
+      const iso = isoUTC(cursor);
+      runningChecking = Math.round((runningChecking + (balanceEvents[iso] || []).reduce((sum, event) => sum + event.signed_amount, 0)) * 100) / 100;
+      if (cursor >= gridStart) balancesByDate[iso] = runningChecking;
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+  }
   const today = localISODate();
   $('#calendarGrid').innerHTML = Array.from({ length: 42 }, (_, index) => {
     const day = new Date(gridStart); day.setUTCDate(gridStart.getUTCDate() + index);
@@ -249,6 +271,7 @@ function renderCalendar(gridStart) {
     return `<article class="calendar-day ${outside ? 'outside' : ''} ${iso === today ? 'today' : ''}">
       <span class="day-number">${day.getUTCDate()}</span>
       <div class="day-events">${events.map(event => `<div class="calendar-event ${event.kind} ${event.funding_source === 'credit' ? 'credit' : ''} ${event.destination_credit_line_id ? 'payment' : ''}" title="${escapeHTML(event.name)} · ${money.format(event.amount)}"><span>${escapeHTML(event.name)}</span><b>${event.kind === 'income' ? '+' : '−'}${money.format(event.amount)}</b></div>`).join('')}</div>
+      <div class="day-balance ${balancesByDate[iso] < 0 ? 'negative' : ''}" title="${balancesByDate[iso] == null ? `Balance projection begins ${state.settings.balance_as_of}` : `Projected end-of-day Checking balance: ${money.format(balancesByDate[iso])}`}"><span>Checking</span><b>${balancesByDate[iso] == null ? '—' : compactMoney.format(balancesByDate[iso])}</b></div>
     </article>`;
   }).join('');
 }
