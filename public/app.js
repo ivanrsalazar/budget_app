@@ -87,7 +87,7 @@ function renderProjection() {
   $('#weekList').innerHTML = p.weeks.map((week, index) => {
     const events = week.events.map(event => `<div class="event">
       <span class="event-date">${weekday.format(asUTC(event.date))}, ${shortDate.format(asUTC(event.date))}</span>
-      <span><b>${escapeHTML(event.name)}</b><br><span class="event-source">${event.funding_source === 'credit' ? `Charged to ${escapeHTML(event.credit_line_name)}` : event.source === 'recurring' ? 'From Checking · Recurring' : event.status}</span></span>
+      <span><b>${escapeHTML(event.name)}</b><br><span class="event-source">${event.destination_credit_line_id ? `Payment to ${escapeHTML(event.destination_credit_line_name)}` : event.funding_source === 'credit' ? `Charged to ${escapeHTML(event.credit_line_name)}` : event.source === 'recurring' ? 'From Checking · Recurring' : event.status}</span></span>
       <b class="event-amount ${event.kind}">${signed(event.amount, event.kind)}</b>
     </div>`).join('') || '<div class="empty-week">No planned activity this week.</div>';
     return `<article class="week-row ${index === 0 ? 'open' : ''}">
@@ -108,12 +108,19 @@ function populateFundingOptions() {
   const selected = select.value;
   select.innerHTML = '<option value="checking">Checking</option>' + state.credit_lines.map(card => `<option value="credit:${card.id}">${escapeHTML(card.name)}</option>`).join('');
   if ([...select.options].some(option => option.value === selected)) select.value = selected;
+  const target = $('#paymentTarget');
+  const selectedTarget = target.value;
+  target.innerHTML = '<option value="none">Regular expense — no card balance reduction</option>' + state.credit_lines.map(card => `<option value="credit:${card.id}">Pay down ${escapeHTML(card.name)}</option>`).join('');
+  if ([...target.options].some(option => option.value === selectedTarget)) target.value = selectedTarget;
 }
 
 function updateFundingField() {
   const form = $('#itemForm');
-  const show = form.elements.item_type.value === 'recurring' && form.elements.kind.value === 'expense';
-  $$('.expense-funding', form).forEach(el => el.classList.toggle('hidden', !show));
+  const expense = form.elements.kind.value === 'expense';
+  const hasTarget = form.elements.payment_target.value !== 'none';
+  $$('.expense-target', form).forEach(el => el.classList.toggle('hidden', !expense));
+  $$('.expense-funding', form).forEach(el => el.classList.toggle('hidden', !(form.elements.item_type.value === 'recurring' && expense && !hasTarget)));
+  if (hasTarget) form.elements.funding_account.value = 'checking';
 }
 
 function renderLists() {
@@ -129,15 +136,20 @@ function renderLists() {
 function renderPlanItems(items, type) {
   if (!items.length) return '<div class="empty-state">Nothing here yet. Add an item to begin.</div>';
   return items.map(item => {
-    const account = item.kind === 'expense' ? ` · ${item.funding_source === 'credit' ? `on ${escapeHTML(state.credit_lines.find(card => card.id === item.credit_line_id)?.name || 'Credit card')}` : 'from Checking'}` : '';
-    const meta = type === 'recurring' ? `${scheduleLabel(item)} · starts ${shortDate.format(asUTC(item.start_date))}${account}${item.active ? '' : ' · paused'}` : `${longDate.format(asUTC(item.date))} · ${item.status}`;
+    const targetCard = state.credit_lines.find(card => card.id === item.destination_credit_line_id)?.name;
+    const account = item.kind === 'expense' ? ` · ${targetCard ? `payment to ${escapeHTML(targetCard)}` : item.funding_source === 'credit' ? `on ${escapeHTML(state.credit_lines.find(card => card.id === item.credit_line_id)?.name || 'Credit card')}` : 'from Checking'}` : '';
+    const meta = type === 'recurring' ? `${scheduleLabel(item)} · starts ${shortDate.format(asUTC(item.start_date))}${account}${item.active ? '' : ' · paused'}` : `${longDate.format(asUTC(item.date))} · ${item.status}${account}`;
     return `<article class="plan-item ${item.active === 0 ? 'inactive' : ''}">
       <div><div class="plan-item-name">${escapeHTML(item.name)}</div><div class="plan-item-meta">${meta}</div></div>
       ${type === 'transaction' ? `<div class="plan-item-meta">${escapeHTML(item.note || item.source.replace('_', ' '))}</div>` : ''}
       <div class="plan-item-amount ${item.kind}">${signed(item.amount, item.kind)}</div>
-      <button class="kebab" data-menu-type="${type}" data-id="${item.id}" aria-label="Edit ${escapeHTML(item.name)}">•••</button>
+      ${itemActionMenu(type, item)}
     </article>`;
   }).join('');
+}
+
+function itemActionMenu(type, item) {
+  return `<div class="item-menu"><button class="kebab" type="button" aria-label="Actions for ${escapeHTML(item.name)}" aria-haspopup="menu">•••</button><div class="action-menu" role="menu"><button type="button" role="menuitem" data-item-action="edit" data-item-type="${type}" data-id="${item.id}">Edit</button><button type="button" role="menuitem" class="danger" data-item-action="delete" data-item-type="${type}" data-id="${item.id}">Delete</button></div></div>`;
 }
 
 function switchView(view) {
@@ -166,6 +178,7 @@ function openItemDialog(type, item = null) {
       else form.elements[key].value = value ?? '';
     }
     form.elements.funding_account.value = item.funding_source === 'credit' ? `credit:${item.credit_line_id}` : 'checking';
+    form.elements.payment_target.value = item.destination_credit_line_id ? `credit:${item.destination_credit_line_id}` : 'none';
   } else {
     form.elements.kind.value = 'expense';
     form.elements.start_date.value = today;
@@ -175,6 +188,7 @@ function openItemDialog(type, item = null) {
     form.elements.status.value = 'planned';
     form.elements.active.checked = true;
     form.elements.funding_account.value = 'checking';
+    form.elements.payment_target.value = 'none';
   }
   updateScheduleFields();
   updateFundingField();
@@ -188,8 +202,10 @@ async function saveItem(event) {
   const type = data.item_type;
   data.amount = Number(data.amount);
   data.active = form.elements.active.checked;
+  const target = data.payment_target || 'none';
+  data.destination_credit_line_id = target.startsWith('credit:') ? Number(target.split(':')[1]) : null;
   if (type === 'recurring') {
-    const funding = data.funding_account || 'checking';
+    const funding = data.destination_credit_line_id ? 'checking' : data.funding_account || 'checking';
     data.funding_source = funding.startsWith('credit:') ? 'credit' : 'checking';
     data.credit_line_id = funding.startsWith('credit:') ? Number(funding.split(':')[1]) : null;
   }
@@ -232,7 +248,7 @@ function renderCalendar(gridStart) {
     const outside = day.getUTCMonth() !== month.getUTCMonth();
     return `<article class="calendar-day ${outside ? 'outside' : ''} ${iso === today ? 'today' : ''}">
       <span class="day-number">${day.getUTCDate()}</span>
-      <div class="day-events">${events.map(event => `<div class="calendar-event ${event.kind} ${event.funding_source === 'credit' ? 'credit' : ''}" title="${escapeHTML(event.name)} · ${money.format(event.amount)}"><span>${escapeHTML(event.name)}</span><b>${event.kind === 'income' ? '+' : '−'}${money.format(event.amount)}</b></div>`).join('')}</div>
+      <div class="day-events">${events.map(event => `<div class="calendar-event ${event.kind} ${event.funding_source === 'credit' ? 'credit' : ''} ${event.destination_credit_line_id ? 'payment' : ''}" title="${escapeHTML(event.name)} · ${money.format(event.amount)}"><span>${escapeHTML(event.name)}</span><b>${event.kind === 'income' ? '+' : '−'}${money.format(event.amount)}</b></div>`).join('')}</div>
     </article>`;
   }).join('');
 }
@@ -251,12 +267,16 @@ function renderCards() {
   const projected = new Map((state.projection?.credit_lines || []).map(card => [card.id, card]));
   $('#creditGrid').innerHTML = cards.map(card => {
     const usage = card.credit_limit ? Math.min(100, card.balance / card.credit_limit * 100) : 0;
-    const future = projected.get(card.id)?.scheduled_charges || 0;
+    const futureCard = projected.get(card.id);
+    const futureCharges = futureCard?.scheduled_charges || 0;
+    const futurePayments = futureCard?.scheduled_payments || 0;
+    const projectedBalance = futureCard?.projected_balance ?? card.balance;
     return `<article class="credit-card">
-      <div class="credit-card-top"><div><span>Credit line</span><h2>${escapeHTML(card.name)}</h2></div><button class="kebab" data-credit-id="${card.id}" aria-label="Edit ${escapeHTML(card.name)}">•••</button></div>
+      <div class="credit-card-top"><div><span>Credit line</span><h2>${escapeHTML(card.name)}</h2></div>${itemActionMenu('credit', card)}</div>
       <div class="credit-balance"><span>Current balance</span><b>${money.format(card.balance)}</b></div>
       ${card.credit_limit ? `<div class="util-track"><i style="width:${usage}%"></i></div><div class="credit-limit"><span>${usage.toFixed(1)}% used</span><span>${money.format(card.credit_limit)} limit</span></div>` : '<div class="credit-limit"><span>No limit entered</span></div>'}
-      <div class="credit-facts"><span><small>Due</small><b>${card.due_day ? `Day ${card.due_day}` : '—'}</b></span><span><small>APR</small><b>${card.apr != null ? `${card.apr}%` : '—'}</b></span><span><small>Next 12 weeks</small><b>+${money.format(future)}</b></span></div>
+      <div class="credit-forecast"><span>Scheduled charges +${money.format(futureCharges)}</span><span>Payments −${money.format(futurePayments)}</span></div>
+      <div class="credit-facts"><span><small>Due</small><b>${card.due_day ? `Day ${card.due_day}` : '—'}</b></span><span><small>APR</small><b>${card.apr != null ? `${card.apr}%` : '—'}</b></span><span><small>In 12 weeks</small><b>${money.format(projectedBalance)}</b></span></div>
     </article>`;
   }).join('');
 }
@@ -280,21 +300,19 @@ async function saveCredit(event) {
   } catch (error) { toast(error.message, true); }
 }
 
-async function manageCredit(id) {
+async function manageCredit(id, action) {
   const card = state.credit_lines.find(item => item.id === Number(id)); if (!card) return;
-  const action = prompt(`Type “edit” to change ${card.name}, or “delete” to remove it.`)?.trim().toLowerCase();
   if (action === 'edit') openCreditDialog(card);
-  if (action === 'delete' && confirm(`Delete ${card.name}? Recurring charges linked to it will switch to Checking.`)) {
+  if (action === 'delete' && confirm(`Delete ${card.name}? Linked charges will switch to Checking and linked payments will become regular expenses.`)) {
     try { await api(`/api/credit-lines/${id}`, { method: 'DELETE' }); await refreshAll(); toast(`${card.name} deleted`); }
     catch (error) { toast(error.message, true); }
   }
 }
 
-async function editOrDelete(type, id) {
+async function handleItemAction(type, id, action) {
   const list = type === 'recurring' ? state.recurring : state.transactions;
   const item = list.find(candidate => candidate.id === Number(id));
   if (!item) return;
-  const action = prompt(`Type “edit” to change ${item.name}, or “delete” to remove it.`)?.trim().toLowerCase();
   if (action === 'edit') openItemDialog(type, item);
   if (action === 'delete' && confirm(`Delete ${item.name}? This cannot be undone.`)) {
     try {
@@ -331,8 +349,11 @@ document.addEventListener('click', event => {
   const close = event.target.closest('[data-dialog-close]'); if (close) { close.closest('dialog').close(); return; }
   const tab = event.target.closest('[data-view]'); if (tab) switchView(tab.dataset.view);
   const add = event.target.closest('[data-add-type]'); if (add) openItemDialog(add.dataset.addType);
-  const menu = event.target.closest('[data-menu-type]'); if (menu) editOrDelete(menu.dataset.menuType, menu.dataset.id);
-  const credit = event.target.closest('[data-credit-id]'); if (credit) manageCredit(credit.dataset.creditId);
+  const action = event.target.closest('[data-item-action]');
+  if (action) {
+    if (action.dataset.itemType === 'credit') manageCredit(action.dataset.id, action.dataset.itemAction);
+    else handleItemAction(action.dataset.itemType, action.dataset.id, action.dataset.itemAction);
+  }
   const week = event.target.closest('.week-summary'); if (week) { const row = week.closest('.week-row'); row.classList.toggle('open'); week.setAttribute('aria-expanded', row.classList.contains('open')); }
 });
 $('#themeToggle').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
@@ -340,6 +361,7 @@ $('#quickAdd').addEventListener('click', () => state.view === 'cards' ? openCred
 $('#adjustBalance').addEventListener('click', openBalanceDialog);
 $('#forecastStart').addEventListener('change', () => loadProjection().catch(error => toast(error.message, true)));
 $('#scheduleType').addEventListener('change', updateScheduleFields);
+$('#paymentTarget').addEventListener('change', updateFundingField);
 $$('input[name="kind"]', $('#itemForm')).forEach(input => input.addEventListener('change', updateFundingField));
 $('#itemForm').addEventListener('submit', saveItem);
 $('#balanceForm').addEventListener('submit', saveBalance);

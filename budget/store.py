@@ -143,6 +143,7 @@ class Store:
                     ordinal INTEGER,
                     funding_source TEXT NOT NULL DEFAULT 'checking',
                     credit_line_id INTEGER REFERENCES credit_lines(id) ON DELETE SET NULL,
+                    destination_credit_line_id INTEGER REFERENCES credit_lines(id) ON DELETE SET NULL,
                     start_date TEXT NOT NULL,
                     end_date TEXT,
                     active INTEGER NOT NULL DEFAULT 1,
@@ -159,6 +160,7 @@ class Store:
                     note TEXT NOT NULL DEFAULT '',
                     source TEXT NOT NULL DEFAULT 'manual',
                     source_key TEXT UNIQUE,
+                    destination_credit_line_id INTEGER REFERENCES credit_lines(id) ON DELETE SET NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS credit_lines (
@@ -185,6 +187,11 @@ class Store:
                 db.execute("ALTER TABLE recurring_items ADD COLUMN funding_source TEXT NOT NULL DEFAULT 'checking'")
             if "credit_line_id" not in recurring_columns:
                 db.execute("ALTER TABLE recurring_items ADD COLUMN credit_line_id INTEGER")
+            if "destination_credit_line_id" not in recurring_columns:
+                db.execute("ALTER TABLE recurring_items ADD COLUMN destination_credit_line_id INTEGER")
+            transaction_columns = {row["name"] for row in db.execute("PRAGMA table_info(transactions)")}
+            if "destination_credit_line_id" not in transaction_columns:
+                db.execute("ALTER TABLE transactions ADD COLUMN destination_credit_line_id INTEGER")
             defaults = {
                 "current_balance": "0",
                 "balance_as_of": iso_today(),
@@ -241,7 +248,12 @@ class Store:
             kind = validate_choice(payload.get("kind"), {"income", "expense"}, "kind")
             funding_source = validate_choice(payload.get("funding_source", "checking"), {"checking", "credit"}, "funding source")
             credit_line_id = parse_optional_id(payload.get("credit_line_id")) if funding_source == "credit" else None
+            destination_credit_line_id = parse_optional_id(payload.get("destination_credit_line_id"))
             if kind == "income":
+                funding_source = "checking"
+                credit_line_id = None
+                destination_credit_line_id = None
+            elif destination_credit_line_id is not None:
                 funding_source = "checking"
                 credit_line_id = None
             if funding_source == "credit" and credit_line_id is None:
@@ -256,6 +268,7 @@ class Store:
                 "ordinal": ordinal,
                 "funding_source": funding_source,
                 "credit_line_id": credit_line_id,
+                "destination_credit_line_id": destination_credit_line_id,
                 "start_date": parse_date(payload.get("start_date", "")).isoformat(),
                 "end_date": parse_date(payload["end_date"]).isoformat() if payload.get("end_date") else None,
                 "active": 1 if payload.get("active", True) else 0,
@@ -263,15 +276,17 @@ class Store:
             }
             fields = list(values)
         elif table == "transactions":
+            kind = validate_choice(payload.get("kind"), {"income", "expense"}, "kind")
             values = {
                 "name": clean_name(payload.get("name")),
-                "kind": validate_choice(payload.get("kind"), {"income", "expense"}, "kind"),
+                "kind": kind,
                 "amount": validate_amount(payload.get("amount")),
                 "date": parse_date(payload.get("date", "")).isoformat(),
                 "status": validate_choice(payload.get("status", "planned"), {"planned", "posted"}, "status"),
                 "note": str(payload.get("note", "")).strip()[:500],
                 "source": "manual",
                 "source_key": None,
+                "destination_credit_line_id": parse_optional_id(payload.get("destination_credit_line_id")) if kind == "expense" else None,
             }
             fields = list(values)
         elif table == "credit_lines":
@@ -293,6 +308,10 @@ class Store:
                 linked = db.execute("SELECT id FROM credit_lines WHERE id = ?", (values["credit_line_id"],)).fetchone()
                 if not linked:
                     raise ValueError("The selected credit line no longer exists")
+            if table in {"recurring_items", "transactions"} and values.get("destination_credit_line_id") is not None:
+                target = db.execute("SELECT id FROM credit_lines WHERE id = ?", (values["destination_credit_line_id"],)).fetchone()
+                if not target:
+                    raise ValueError("The selected payment destination no longer exists")
             if table == "credit_lines":
                 duplicate = db.execute(
                     "SELECT id FROM credit_lines WHERE lower(name) = lower(?) AND id != ?",
@@ -324,7 +343,15 @@ class Store:
         with self.connect() as db:
             if table == "credit_lines":
                 db.execute(
-                    "UPDATE recurring_items SET funding_source = 'checking', credit_line_id = NULL WHERE credit_line_id = ?",
+                    """UPDATE recurring_items
+                       SET funding_source = CASE WHEN credit_line_id = ? THEN 'checking' ELSE funding_source END,
+                           credit_line_id = CASE WHEN credit_line_id = ? THEN NULL ELSE credit_line_id END,
+                           destination_credit_line_id = CASE WHEN destination_credit_line_id = ? THEN NULL ELSE destination_credit_line_id END
+                       WHERE credit_line_id = ? OR destination_credit_line_id = ?""",
+                    (item_id, item_id, item_id, item_id, item_id),
+                )
+                db.execute(
+                    "UPDATE transactions SET destination_credit_line_id = NULL WHERE destination_credit_line_id = ?",
                     (item_id,),
                 )
             cursor = db.execute(f"DELETE FROM {table} WHERE id = ?", (item_id,))
@@ -339,14 +366,19 @@ class Store:
 
         with self.connect() as db:
             recurring = db.execute(
-                """SELECT recurring_items.*, credit_lines.name AS credit_line_name
+                """SELECT recurring_items.*, source_card.name AS credit_line_name,
+                          target_card.name AS destination_credit_line_name
                    FROM recurring_items
-                   LEFT JOIN credit_lines ON credit_lines.id = recurring_items.credit_line_id
+                   LEFT JOIN credit_lines AS source_card ON source_card.id = recurring_items.credit_line_id
+                   LEFT JOIN credit_lines AS target_card ON target_card.id = recurring_items.destination_credit_line_id
                    WHERE recurring_items.active = 1"""
             ).fetchall()
             credit_lines = [dict(row) for row in db.execute("SELECT * FROM credit_lines ORDER BY name")]
             transactions = db.execute(
-                "SELECT * FROM transactions WHERE date BETWEEN ? AND ? ORDER BY date, id",
+                """SELECT transactions.*, target_card.name AS destination_credit_line_name
+                   FROM transactions
+                   LEFT JOIN credit_lines AS target_card ON target_card.id = transactions.destination_credit_line_id
+                   WHERE date BETWEEN ? AND ? ORDER BY date, transactions.id""",
                 (start.isoformat(), end.isoformat()),
             ).fetchall()
 
@@ -389,6 +421,7 @@ class Store:
             income = money(sum(event["amount"] for event in week_events if event["kind"] == "income"))
             expenses = money(sum(event["amount"] for event in week_events if event["kind"] == "expense" and event["funding_source"] == "checking"))
             card_charges = money(sum(event["amount"] for event in week_events if event["kind"] == "expense" and event["funding_source"] == "credit"))
+            card_payments = money(sum(event["amount"] for event in week_events if event["destination_credit_line_id"] is not None))
             opening = running
             running = money(running + income - expenses)
             lowest = min(lowest, running)
@@ -399,6 +432,7 @@ class Store:
                 "income": income,
                 "expenses": expenses,
                 "card_charges": card_charges,
+                "card_payments": card_payments,
                 "closing_balance": running,
                 "events": week_events,
             })
@@ -409,10 +443,15 @@ class Store:
                 event["amount"] for event in events
                 if event["funding_source"] == "credit" and event["credit_line_id"] == card["id"]
             ))
+            scheduled_payments = money(sum(
+                event["amount"] for event in events
+                if event["destination_credit_line_id"] == card["id"]
+            ))
             projected_cards.append({
                 **card,
                 "scheduled_charges": scheduled_charges,
-                "projected_balance": money(card["balance"] + scheduled_charges),
+                "scheduled_payments": scheduled_payments,
+                "projected_balance": money(max(0, card["balance"] + scheduled_charges - scheduled_payments)),
             })
 
         return {
@@ -576,6 +615,8 @@ def event_from_row(row: sqlite3.Row, day: date, source: str) -> dict:
     funding_source = row["funding_source"] if source == "recurring" else "checking"
     credit_line_id = row["credit_line_id"] if source == "recurring" else None
     credit_line_name = row["credit_line_name"] if source == "recurring" else None
+    destination_credit_line_id = row["destination_credit_line_id"]
+    destination_credit_line_name = row["destination_credit_line_name"]
     cash_effect = kind == "income" or funding_source == "checking"
     return {
         "id": row["id"],
@@ -590,6 +631,8 @@ def event_from_row(row: sqlite3.Row, day: date, source: str) -> dict:
         "funding_source": funding_source,
         "credit_line_id": credit_line_id,
         "credit_line_name": credit_line_name,
+        "destination_credit_line_id": destination_credit_line_id,
+        "destination_credit_line_name": destination_credit_line_name,
     }
 
 

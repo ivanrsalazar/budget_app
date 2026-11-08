@@ -111,6 +111,36 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(updated["funding_source"], "checking")
         self.assertIsNone(updated["credit_line_id"])
 
+    def test_one_time_and_recurring_card_payments_reduce_projected_debt(self):
+        card = self.store.save_item("credit_lines", {"name": "Capital One", "balance": 600})
+        recurring = self.store.save_item("recurring_items", {
+            "name": "Monthly card payment", "kind": "expense", "amount": 100,
+            "frequency": "monthly", "start_date": "2026-11-10", "active": True,
+            "funding_source": "credit", "credit_line_id": card["id"],
+            "destination_credit_line_id": card["id"],
+        })
+        transaction = self.store.save_item("transactions", {
+            "name": "Extra card payment", "kind": "expense", "amount": 50,
+            "date": "2026-11-12", "status": "planned",
+            "destination_credit_line_id": card["id"],
+        })
+
+        # A payment target always forces the source back to Checking.
+        self.assertEqual(recurring["funding_source"], "checking")
+        self.assertIsNone(recurring["credit_line_id"])
+        result = self.store.projection(date(2026, 11, 8), 1)
+        self.assertEqual(result["weeks"][0]["expenses"], 150)
+        self.assertEqual(result["weeks"][0]["card_payments"], 150)
+        self.assertEqual(result["ending_balance"], 850)
+        self.assertEqual(result["credit_lines"][0]["scheduled_payments"], 150)
+        self.assertEqual(result["credit_lines"][0]["projected_balance"], 450)
+
+        self.store.delete_item("credit_lines", card["id"])
+        recurring_after = next(item for item in self.store.list_items("recurring_items") if item["id"] == recurring["id"])
+        transaction_after = next(item for item in self.store.list_items("transactions") if item["id"] == transaction["id"])
+        self.assertIsNone(recurring_after["destination_credit_line_id"])
+        self.assertIsNone(transaction_after["destination_credit_line_id"])
+
     def test_sample_import_is_idempotent(self):
         sample = Path(self.temp.name) / "sample.csv"
         sample.write_text(",Nov 5th,,Nov 12th\n,389,,1343\nExpenses,,Expenses,\nRent,/500,Food,100\nexpense subtotal,500,expense subtotal,100\nLeft,111,Left,1243\n", encoding="utf-8")

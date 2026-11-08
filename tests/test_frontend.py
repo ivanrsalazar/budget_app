@@ -32,6 +32,15 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('id="calendarGrid"', markup)
         self.assertIn('id="creditForm"', markup)
         self.assertIn('name="funding_account"', markup)
+        self.assertIn('name="payment_target"', markup)
+
+    def test_item_actions_use_visible_menu_instead_of_typed_prompt(self):
+        script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertNotIn("prompt(`Type", script)
+        self.assertIn('data-item-action="edit"', script)
+        self.assertIn('data-item-action="delete"', script)
+        self.assertIn('.item-menu:hover .action-menu', styles)
 
 
 if __name__ == "__main__":
