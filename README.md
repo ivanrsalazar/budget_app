@@ -20,6 +20,9 @@ On the first run, if `resources/Finances - Winter '26_'27.csv` exists, its dated
 - Add recurring income and expenses by interval, every selected weekday, or an ordinal weekday such as the third Thursday of each month.
 - Add one-time planned or posted items.
 - See a 12-week running cash-flow forecast and the lowest projected balance.
+- Browse a monthly calendar of recurring and one-time activity.
+- Track credit-card balances, limits, APRs, due days, and minimum payments.
+- Assign recurring expenses to Checking or a saved credit line.
 - See exactly how much remains immediately before the next expected income.
 - Edit, pause, or delete recurring rules and one-time items.
 - Switch between light and dark themes; the preference is remembered locally.

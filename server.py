@@ -29,6 +29,7 @@ class BudgetHandler(BaseHTTPRequestHandler):
                     "settings": STORE.settings(),
                     "recurring": STORE.list_items("recurring_items"),
                     "transactions": STORE.list_items("transactions"),
+                    "credit_lines": STORE.list_items("credit_lines"),
                 })
             elif parsed.path == "/api/projection":
                 query = parse_qs(parsed.query)
@@ -62,10 +63,10 @@ class BudgetHandler(BaseHTTPRequestHandler):
                 return
 
             parts = [part for part in path.split("/") if part]
-            if len(parts) not in {2, 3} or parts[0] != "api" or parts[1] not in {"recurring", "transactions"}:
+            if len(parts) not in {2, 3} or parts[0] != "api" or parts[1] not in {"recurring", "transactions", "credit-lines"}:
                 self.error_response(HTTPStatus.NOT_FOUND, "API route not found")
                 return
-            table = "recurring_items" if parts[1] == "recurring" else "transactions"
+            table = {"recurring": "recurring_items", "transactions": "transactions", "credit-lines": "credit_lines"}[parts[1]]
             item_id = int(parts[2]) if len(parts) == 3 else None
             if method == "POST" and item_id is None:
                 self.json_response(STORE.save_item(table, payload), HTTPStatus.CREATED)

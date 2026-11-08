@@ -89,6 +89,28 @@ class StoreTests(unittest.TestCase):
         rent_dates = [event["date"] for week in result["weeks"] for event in week["events"]]
         self.assertEqual(rent_dates, ["2026-11-19", "2026-12-17"])
 
+    def test_credit_funded_expense_increases_card_charges_not_cash_outflow(self):
+        card = self.store.save_item("credit_lines", {
+            "name": "Discover", "balance": 500, "credit_limit": 3000,
+            "apr": 24.99, "due_day": 15, "minimum_payment": 35,
+        })
+        recurring = self.store.save_item("recurring_items", {
+            "name": "Streaming", "kind": "expense", "amount": 25,
+            "frequency": "weekly", "start_date": "2026-11-09", "active": True,
+            "funding_source": "credit", "credit_line_id": card["id"],
+        })
+        result = self.store.projection(date(2026, 11, 8), 1)
+        self.assertEqual(result["weeks"][0]["expenses"], 0)
+        self.assertEqual(result["weeks"][0]["card_charges"], 25)
+        self.assertEqual(result["ending_balance"], 1000)
+        self.assertEqual(result["credit_lines"][0]["projected_balance"], 525)
+        self.assertEqual(result["weeks"][0]["events"][0]["credit_line_name"], "Discover")
+
+        self.store.delete_item("credit_lines", card["id"])
+        updated = next(item for item in self.store.list_items("recurring_items") if item["id"] == recurring["id"])
+        self.assertEqual(updated["funding_source"], "checking")
+        self.assertIsNone(updated["credit_line_id"])
+
     def test_sample_import_is_idempotent(self):
         sample = Path(self.temp.name) / "sample.csv"
         sample.write_text(",Nov 5th,,Nov 12th\n,389,,1343\nExpenses,,Expenses,\nRent,/500,Food,100\nexpense subtotal,500,expense subtotal,100\nLeft,111,Left,1243\n", encoding="utf-8")

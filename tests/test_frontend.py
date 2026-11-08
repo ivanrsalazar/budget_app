@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class FrontendRegressionTests(unittest.TestCase):
     def test_dialog_cancel_controls_never_submit_required_forms(self):
         markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
-        self.assertEqual(markup.count('type="button" data-dialog-close'), 4)
+        self.assertEqual(markup.count('type="button" data-dialog-close'), 6)
         self.assertNotIn('class="icon-button" value="cancel"', markup)
 
     def test_theme_bootstraps_before_styles_and_has_a_toggle(self):
@@ -24,6 +24,14 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('value="nth_weekday">Nth weekday of each month', markup)
         self.assertIn('<option value="3" selected>Thursday</option>', markup)
         self.assertIn('<option value="3" selected>Third</option>', markup)
+
+    def test_calendar_credit_cards_and_funding_source_are_present(self):
+        markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('data-view-panel="calendar"', markup)
+        self.assertIn('data-view-panel="cards"', markup)
+        self.assertIn('id="calendarGrid"', markup)
+        self.assertIn('id="creditForm"', markup)
+        self.assertIn('name="funding_account"', markup)
 
 
 if __name__ == "__main__":

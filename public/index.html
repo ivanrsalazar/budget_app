@@ -21,8 +21,10 @@
       </a>
       <nav class="tabs" aria-label="Budget sections">
         <button class="tab active" data-view="forecast">Forecast</button>
+        <button class="tab" data-view="calendar">Calendar</button>
         <button class="tab" data-view="plan">Recurring plan</button>
         <button class="tab" data-view="one-time">One-time</button>
+        <button class="tab" data-view="cards">Credit cards</button>
       </nav>
       <button class="theme-toggle" id="themeToggle" type="button" aria-label="Use dark theme" aria-pressed="false"><span aria-hidden="true">☾</span></button>
       <button class="button button-primary compact" id="quickAdd">+ Add item</button>
@@ -40,6 +42,17 @@
             <input type="date" id="forecastStart">
           </label>
           <button class="button button-ghost" id="adjustBalance">Adjust balance</button>
+        </div>
+      </section>
+
+      <section class="view hidden" data-view-panel="calendar">
+        <div class="page-heading calendar-heading">
+          <div><p class="eyebrow">MONTH AT A GLANCE</p><h1>Calendar</h1><p>See cash activity and card charges on the exact days they land.</p></div>
+          <div class="month-controls"><button class="icon-button" id="previousMonth" type="button" aria-label="Previous month">‹</button><strong id="calendarMonth"></strong><button class="icon-button" id="nextMonth" type="button" aria-label="Next month">›</button></div>
+        </div>
+        <div class="calendar-wrap">
+          <div class="calendar-weekdays" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+          <div class="calendar-grid" id="calendarGrid" aria-live="polite"></div>
         </div>
       </section>
 
@@ -82,6 +95,15 @@
         </div>
         <div class="item-list full-list" id="transactionList"></div>
       </section>
+
+      <section class="view hidden" data-view-panel="cards">
+        <div class="page-heading">
+          <div><p class="eyebrow">DEBT &amp; CREDIT</p><h1>Credit cards</h1><p>Track balances, limits, due dates, and recurring charges on each credit line.</p></div>
+          <button class="button button-primary" id="addCreditLine">+ Add credit line</button>
+        </div>
+        <div class="debt-summary" id="debtSummary"></div>
+        <div class="credit-grid" id="creditGrid"></div>
+      </section>
     </main>
 
     <footer><span>TrueNorth Budget</span><span>Stored privately on this device</span></footer>
@@ -115,9 +137,29 @@
         <label class="field recurring-only">Ends <small>optional</small><input name="end_date" type="date"></label>
         <label class="field transaction-only">Date<input name="date" type="date"></label>
       </div>
+      <label class="field wide recurring-only expense-funding">Paid from<select name="funding_account" id="fundingAccount"><option value="checking">Checking</option></select><small class="field-help">Card charges add to debt but do not reduce checking until you schedule a card payment.</small></label>
       <label class="field wide">Note <small>optional</small><textarea name="note" rows="2" maxlength="500" placeholder="Anything useful to remember"></textarea></label>
       <label class="active-check recurring-only"><input type="checkbox" name="active" checked><span>Include this item in forecasts</span></label>
       <div class="dialog-actions"><button class="button button-ghost" type="button" data-dialog-close>Cancel</button><button class="button button-primary" type="submit" value="default">Save item</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="creditDialog">
+    <form method="dialog" id="creditForm">
+      <div class="dialog-head"><div><p class="eyebrow">CREDIT LINE</p><h2 id="creditDialogTitle">Add credit line</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close">×</button></div>
+      <input type="hidden" name="id">
+      <label class="field wide">Card name<input name="name" required maxlength="100" placeholder="e.g. Discover"></label>
+      <div class="field-row">
+        <label class="field">Current balance<span class="money-input"><b>$</b><input name="balance" type="number" min="0" step="0.01" required value="0"></span></label>
+        <label class="field">Credit limit <small>optional</small><span class="money-input"><b>$</b><input name="credit_limit" type="number" min="0" step="0.01" placeholder="0.00"></span></label>
+      </div>
+      <div class="field-row">
+        <label class="field">APR <small>optional</small><input name="apr" type="number" min="0" step="0.01" placeholder="24.99"></label>
+        <label class="field">Payment due day <small>optional</small><input name="due_day" type="number" min="1" max="31" step="1" placeholder="15"></label>
+      </div>
+      <label class="field wide">Minimum payment <small>optional</small><span class="money-input"><b>$</b><input name="minimum_payment" type="number" min="0" step="0.01" placeholder="0.00"></span></label>
+      <label class="field wide">Note <small>optional</small><textarea name="note" rows="2" maxlength="500" placeholder="Rewards, account nickname, or payoff goal"></textarea></label>
+      <div class="dialog-actions"><button class="button button-ghost" type="button" data-dialog-close>Cancel</button><button class="button button-primary" type="submit">Save credit line</button></div>
     </form>
   </dialog>
 

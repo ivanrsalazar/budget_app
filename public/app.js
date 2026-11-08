@@ -1,4 +1,4 @@
-const state = { settings: null, recurring: [], transactions: [], projection: null, view: 'forecast' };
+const state = { settings: null, recurring: [], transactions: [], credit_lines: [], projection: null, calendarProjection: null, calendarDate: null, view: 'forecast' };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -22,6 +22,7 @@ function localISODate() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
+function isoUTC(value) { return value.toISOString().slice(0, 10); }
 function asUTC(value) { return new Date(`${value}T00:00:00Z`); }
 function escapeHTML(value) { const el = document.createElement('div'); el.textContent = String(value ?? ''); return el.innerHTML; }
 function signed(value, kind) { return `${kind === 'income' ? '+' : '−'}${money.format(value)}`; }
@@ -53,9 +54,12 @@ async function load() {
   try {
     const data = await api('/api/bootstrap');
     Object.assign(state, data);
+    state.calendarDate = new Date(`${localISODate().slice(0, 7)}-01T00:00:00Z`);
+    populateFundingOptions();
     $('#forecastStart').value = localISODate();
     await loadProjection();
     renderLists();
+    renderCards();
   } catch (error) { toast(error.message, true); }
 }
 
@@ -83,19 +87,33 @@ function renderProjection() {
   $('#weekList').innerHTML = p.weeks.map((week, index) => {
     const events = week.events.map(event => `<div class="event">
       <span class="event-date">${weekday.format(asUTC(event.date))}, ${shortDate.format(asUTC(event.date))}</span>
-      <span><b>${escapeHTML(event.name)}</b><br><span class="event-source">${event.source === 'recurring' ? 'Recurring' : event.status}</span></span>
+      <span><b>${escapeHTML(event.name)}</b><br><span class="event-source">${event.funding_source === 'credit' ? `Charged to ${escapeHTML(event.credit_line_name)}` : event.source === 'recurring' ? 'From Checking · Recurring' : event.status}</span></span>
       <b class="event-amount ${event.kind}">${signed(event.amount, event.kind)}</b>
     </div>`).join('') || '<div class="empty-week">No planned activity this week.</div>';
     return `<article class="week-row ${index === 0 ? 'open' : ''}">
-      <button class="week-summary" aria-expanded="${index === 0}">
+      <button class="week-summary with-cards" aria-expanded="${index === 0}">
         <span class="week-name">${index === 0 ? 'This week' : `Week ${index + 1}`}<span class="week-dates">${shortDate.format(asUTC(week.start))} – ${longDate.format(asUTC(week.end))}</span></span>
         <span class="amount-block in"><span>Money in</span><b>+${money.format(week.income)}</b></span>
         <span class="amount-block out"><span>Money out</span><b>−${money.format(week.expenses)}</b></span>
+        <span class="amount-block card"><span>Card charges</span><b>${money.format(week.card_charges)}</b></span>
         <span class="amount-block"><span>Week ending</span><b class="close-balance ${week.closing_balance < 0 ? 'negative' : ''}">${money.format(week.closing_balance)}</b></span>
         <span class="chevron">⌄</span>
       </button><div class="event-list">${events}</div>
     </article>`;
   }).join('');
+}
+
+function populateFundingOptions() {
+  const select = $('#fundingAccount');
+  const selected = select.value;
+  select.innerHTML = '<option value="checking">Checking</option>' + state.credit_lines.map(card => `<option value="credit:${card.id}">${escapeHTML(card.name)}</option>`).join('');
+  if ([...select.options].some(option => option.value === selected)) select.value = selected;
+}
+
+function updateFundingField() {
+  const form = $('#itemForm');
+  const show = form.elements.item_type.value === 'recurring' && form.elements.kind.value === 'expense';
+  $$('.expense-funding', form).forEach(el => el.classList.toggle('hidden', !show));
 }
 
 function renderLists() {
@@ -111,7 +129,8 @@ function renderLists() {
 function renderPlanItems(items, type) {
   if (!items.length) return '<div class="empty-state">Nothing here yet. Add an item to begin.</div>';
   return items.map(item => {
-    const meta = type === 'recurring' ? `${scheduleLabel(item)} · starts ${shortDate.format(asUTC(item.start_date))}${item.active ? '' : ' · paused'}` : `${longDate.format(asUTC(item.date))} · ${item.status}`;
+    const account = item.kind === 'expense' ? ` · ${item.funding_source === 'credit' ? `on ${escapeHTML(state.credit_lines.find(card => card.id === item.credit_line_id)?.name || 'Credit card')}` : 'from Checking'}` : '';
+    const meta = type === 'recurring' ? `${scheduleLabel(item)} · starts ${shortDate.format(asUTC(item.start_date))}${account}${item.active ? '' : ' · paused'}` : `${longDate.format(asUTC(item.date))} · ${item.status}`;
     return `<article class="plan-item ${item.active === 0 ? 'inactive' : ''}">
       <div><div class="plan-item-name">${escapeHTML(item.name)}</div><div class="plan-item-meta">${meta}</div></div>
       ${type === 'transaction' ? `<div class="plan-item-meta">${escapeHTML(item.note || item.source.replace('_', ' '))}</div>` : ''}
@@ -125,6 +144,8 @@ function switchView(view) {
   state.view = view;
   $$('.view').forEach(panel => panel.classList.toggle('hidden', panel.dataset.viewPanel !== view));
   $$('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.view === view));
+  if (view === 'calendar') loadCalendar().catch(error => toast(error.message, true));
+  if (view === 'cards') renderCards();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -144,6 +165,7 @@ function openItemDialog(type, item = null) {
       if (form.elements[key].type === 'checkbox') form.elements[key].checked = Boolean(value);
       else form.elements[key].value = value ?? '';
     }
+    form.elements.funding_account.value = item.funding_source === 'credit' ? `credit:${item.credit_line_id}` : 'checking';
   } else {
     form.elements.kind.value = 'expense';
     form.elements.start_date.value = today;
@@ -152,8 +174,10 @@ function openItemDialog(type, item = null) {
     form.elements.frequency.value = 'monthly';
     form.elements.status.value = 'planned';
     form.elements.active.checked = true;
+    form.elements.funding_account.value = 'checking';
   }
   updateScheduleFields();
+  updateFundingField();
   $('#itemDialog').showModal();
 }
 
@@ -164,6 +188,11 @@ async function saveItem(event) {
   const type = data.item_type;
   data.amount = Number(data.amount);
   data.active = form.elements.active.checked;
+  if (type === 'recurring') {
+    const funding = data.funding_account || 'checking';
+    data.funding_source = funding.startsWith('credit:') ? 'credit' : 'checking';
+    data.credit_line_id = funding.startsWith('credit:') ? Number(funding.split(':')[1]) : null;
+  }
   const route = type === 'recurring' ? 'recurring' : 'transactions';
   try {
     await api(`/api/${route}${data.id ? `/${data.id}` : ''}`, { method: data.id ? 'PUT' : 'POST', body: JSON.stringify(data) });
@@ -176,8 +205,89 @@ async function saveItem(event) {
 async function refreshAll() {
   const data = await api('/api/bootstrap');
   Object.assign(state, data);
+  populateFundingOptions();
   renderLists();
   await loadProjection();
+  renderCards();
+  if (state.view === 'calendar') await loadCalendar();
+}
+
+async function loadCalendar() {
+  const month = state.calendarDate;
+  const first = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1));
+  const gridStart = new Date(first); gridStart.setUTCDate(1 - first.getUTCDay());
+  state.calendarProjection = await api(`/api/projection?start=${isoUTC(gridStart)}&weeks=6`);
+  renderCalendar(gridStart);
+}
+
+function renderCalendar(gridStart) {
+  const month = state.calendarDate;
+  $('#calendarMonth').textContent = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(month);
+  const eventsByDate = {};
+  state.calendarProjection.weeks.flatMap(week => week.events).forEach(event => (eventsByDate[event.date] ||= []).push(event));
+  const today = localISODate();
+  $('#calendarGrid').innerHTML = Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(gridStart); day.setUTCDate(gridStart.getUTCDate() + index);
+    const iso = isoUTC(day); const events = eventsByDate[iso] || [];
+    const outside = day.getUTCMonth() !== month.getUTCMonth();
+    return `<article class="calendar-day ${outside ? 'outside' : ''} ${iso === today ? 'today' : ''}">
+      <span class="day-number">${day.getUTCDate()}</span>
+      <div class="day-events">${events.map(event => `<div class="calendar-event ${event.kind} ${event.funding_source === 'credit' ? 'credit' : ''}" title="${escapeHTML(event.name)} · ${money.format(event.amount)}"><span>${escapeHTML(event.name)}</span><b>${event.kind === 'income' ? '+' : '−'}${money.format(event.amount)}</b></div>`).join('')}</div>
+    </article>`;
+  }).join('');
+}
+
+function renderCards() {
+  const cards = state.credit_lines;
+  const debt = cards.reduce((sum, card) => sum + card.balance, 0);
+  const limits = cards.reduce((sum, card) => sum + (card.credit_limit || 0), 0);
+  const available = Math.max(0, limits - debt);
+  const utilization = limits ? debt / limits * 100 : 0;
+  $('#debtSummary').innerHTML = `<article><span>Total card debt</span><b>${money.format(debt)}</b></article><article><span>Available credit</span><b>${limits ? money.format(available) : '—'}</b></article><article><span>Utilization</span><b>${limits ? `${utilization.toFixed(1)}%` : '—'}</b></article>`;
+  if (!cards.length) {
+    $('#creditGrid').innerHTML = '<div class="empty-state credit-empty">No credit lines yet. Add Discover, Capital One, or another card to begin.</div>';
+    return;
+  }
+  const projected = new Map((state.projection?.credit_lines || []).map(card => [card.id, card]));
+  $('#creditGrid').innerHTML = cards.map(card => {
+    const usage = card.credit_limit ? Math.min(100, card.balance / card.credit_limit * 100) : 0;
+    const future = projected.get(card.id)?.scheduled_charges || 0;
+    return `<article class="credit-card">
+      <div class="credit-card-top"><div><span>Credit line</span><h2>${escapeHTML(card.name)}</h2></div><button class="kebab" data-credit-id="${card.id}" aria-label="Edit ${escapeHTML(card.name)}">•••</button></div>
+      <div class="credit-balance"><span>Current balance</span><b>${money.format(card.balance)}</b></div>
+      ${card.credit_limit ? `<div class="util-track"><i style="width:${usage}%"></i></div><div class="credit-limit"><span>${usage.toFixed(1)}% used</span><span>${money.format(card.credit_limit)} limit</span></div>` : '<div class="credit-limit"><span>No limit entered</span></div>'}
+      <div class="credit-facts"><span><small>Due</small><b>${card.due_day ? `Day ${card.due_day}` : '—'}</b></span><span><small>APR</small><b>${card.apr != null ? `${card.apr}%` : '—'}</b></span><span><small>Next 12 weeks</small><b>+${money.format(future)}</b></span></div>
+    </article>`;
+  }).join('');
+}
+
+function openCreditDialog(card = null) {
+  const form = $('#creditForm'); form.reset();
+  form.elements.id.value = card?.id || '';
+  $('#creditDialogTitle').textContent = `${card ? 'Edit' : 'Add'} credit line`;
+  if (card) Object.entries(card).forEach(([key, value]) => { if (form.elements[key]) form.elements[key].value = value ?? ''; });
+  else form.elements.balance.value = '0';
+  $('#creditDialog').showModal();
+}
+
+async function saveCredit(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  const id = data.id;
+  try {
+    await api(`/api/credit-lines${id ? `/${id}` : ''}`, { method: id ? 'PUT' : 'POST', body: JSON.stringify(data) });
+    $('#creditDialog').close(); await refreshAll(); toast(`${data.name} saved`);
+  } catch (error) { toast(error.message, true); }
+}
+
+async function manageCredit(id) {
+  const card = state.credit_lines.find(item => item.id === Number(id)); if (!card) return;
+  const action = prompt(`Type “edit” to change ${card.name}, or “delete” to remove it.`)?.trim().toLowerCase();
+  if (action === 'edit') openCreditDialog(card);
+  if (action === 'delete' && confirm(`Delete ${card.name}? Recurring charges linked to it will switch to Checking.`)) {
+    try { await api(`/api/credit-lines/${id}`, { method: 'DELETE' }); await refreshAll(); toast(`${card.name} deleted`); }
+    catch (error) { toast(error.message, true); }
+  }
 }
 
 async function editOrDelete(type, id) {
@@ -222,15 +332,21 @@ document.addEventListener('click', event => {
   const tab = event.target.closest('[data-view]'); if (tab) switchView(tab.dataset.view);
   const add = event.target.closest('[data-add-type]'); if (add) openItemDialog(add.dataset.addType);
   const menu = event.target.closest('[data-menu-type]'); if (menu) editOrDelete(menu.dataset.menuType, menu.dataset.id);
+  const credit = event.target.closest('[data-credit-id]'); if (credit) manageCredit(credit.dataset.creditId);
   const week = event.target.closest('.week-summary'); if (week) { const row = week.closest('.week-row'); row.classList.toggle('open'); week.setAttribute('aria-expanded', row.classList.contains('open')); }
 });
 $('#themeToggle').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
-$('#quickAdd').addEventListener('click', () => openItemDialog(state.view === 'one-time' ? 'transaction' : 'recurring'));
+$('#quickAdd').addEventListener('click', () => state.view === 'cards' ? openCreditDialog() : openItemDialog(state.view === 'one-time' ? 'transaction' : 'recurring'));
 $('#adjustBalance').addEventListener('click', openBalanceDialog);
 $('#forecastStart').addEventListener('change', () => loadProjection().catch(error => toast(error.message, true)));
 $('#scheduleType').addEventListener('change', updateScheduleFields);
+$$('input[name="kind"]', $('#itemForm')).forEach(input => input.addEventListener('change', updateFundingField));
 $('#itemForm').addEventListener('submit', saveItem);
 $('#balanceForm').addEventListener('submit', saveBalance);
+$('#creditForm').addEventListener('submit', saveCredit);
+$('#addCreditLine').addEventListener('click', () => openCreditDialog());
+$('#previousMonth').addEventListener('click', () => { state.calendarDate.setUTCMonth(state.calendarDate.getUTCMonth() - 1); loadCalendar().catch(error => toast(error.message, true)); });
+$('#nextMonth').addEventListener('click', () => { state.calendarDate.setUTCMonth(state.calendarDate.getUTCMonth() + 1); loadCalendar().catch(error => toast(error.message, true)); });
 applyTheme(document.documentElement.dataset.theme);
 load();
 

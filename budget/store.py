@@ -141,6 +141,8 @@ class Store:
                     schedule_type TEXT NOT NULL DEFAULT 'interval',
                     weekday INTEGER,
                     ordinal INTEGER,
+                    funding_source TEXT NOT NULL DEFAULT 'checking',
+                    credit_line_id INTEGER REFERENCES credit_lines(id) ON DELETE SET NULL,
                     start_date TEXT NOT NULL,
                     end_date TEXT,
                     active INTEGER NOT NULL DEFAULT 1,
@@ -159,6 +161,17 @@ class Store:
                     source_key TEXT UNIQUE,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS credit_lines (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    balance REAL NOT NULL DEFAULT 0 CHECK(balance >= 0),
+                    credit_limit REAL,
+                    apr REAL,
+                    due_day INTEGER,
+                    minimum_payment REAL,
+                    note TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 """
             )
             recurring_columns = {row["name"] for row in db.execute("PRAGMA table_info(recurring_items)")}
@@ -168,6 +181,10 @@ class Store:
                 db.execute("ALTER TABLE recurring_items ADD COLUMN weekday INTEGER")
             if "ordinal" not in recurring_columns:
                 db.execute("ALTER TABLE recurring_items ADD COLUMN ordinal INTEGER")
+            if "funding_source" not in recurring_columns:
+                db.execute("ALTER TABLE recurring_items ADD COLUMN funding_source TEXT NOT NULL DEFAULT 'checking'")
+            if "credit_line_id" not in recurring_columns:
+                db.execute("ALTER TABLE recurring_items ADD COLUMN credit_line_id INTEGER")
             defaults = {
                 "current_balance": "0",
                 "balance_as_of": iso_today(),
@@ -197,9 +214,9 @@ class Store:
         return self.settings()
 
     def list_items(self, table: str) -> list[dict]:
-        if table not in {"recurring_items", "transactions"}:
+        if table not in {"recurring_items", "transactions", "credit_lines"}:
             raise ValueError("Invalid table")
-        order = "start_date, name" if table == "recurring_items" else "date, name"
+        order = {"recurring_items": "start_date, name", "transactions": "date, name", "credit_lines": "name"}[table]
         with self.connect() as db:
             return [dict(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY {order}")]
 
@@ -221,14 +238,24 @@ class Store:
                 frequency = "weekly"
             elif schedule_type == "nth_weekday":
                 frequency = "monthly"
+            kind = validate_choice(payload.get("kind"), {"income", "expense"}, "kind")
+            funding_source = validate_choice(payload.get("funding_source", "checking"), {"checking", "credit"}, "funding source")
+            credit_line_id = parse_optional_id(payload.get("credit_line_id")) if funding_source == "credit" else None
+            if kind == "income":
+                funding_source = "checking"
+                credit_line_id = None
+            if funding_source == "credit" and credit_line_id is None:
+                raise ValueError("Choose a credit line for this expense")
             values = {
                 "name": clean_name(payload.get("name")),
-                "kind": validate_choice(payload.get("kind"), {"income", "expense"}, "kind"),
+                "kind": kind,
                 "amount": validate_amount(payload.get("amount")),
                 "frequency": validate_choice(frequency, {"weekly", "biweekly", "monthly", "quarterly", "yearly"}, "frequency"),
                 "schedule_type": schedule_type,
                 "weekday": weekday,
                 "ordinal": ordinal,
+                "funding_source": funding_source,
+                "credit_line_id": credit_line_id,
                 "start_date": parse_date(payload.get("start_date", "")).isoformat(),
                 "end_date": parse_date(payload["end_date"]).isoformat() if payload.get("end_date") else None,
                 "active": 1 if payload.get("active", True) else 0,
@@ -247,10 +274,32 @@ class Store:
                 "source_key": None,
             }
             fields = list(values)
+        elif table == "credit_lines":
+            values = {
+                "name": clean_name(payload.get("name")),
+                "balance": validate_nonnegative(payload.get("balance", 0), "Balance"),
+                "credit_limit": validate_optional_nonnegative(payload.get("credit_limit"), "Credit limit"),
+                "apr": validate_optional_nonnegative(payload.get("apr"), "APR"),
+                "due_day": validate_optional_int(payload.get("due_day"), range(1, 32), "due day"),
+                "minimum_payment": validate_optional_nonnegative(payload.get("minimum_payment"), "Minimum payment"),
+                "note": str(payload.get("note", "")).strip()[:500],
+            }
+            fields = list(values)
         else:
             raise ValueError("Invalid item type")
 
         with self.connect() as db:
+            if table == "recurring_items" and values["funding_source"] == "credit":
+                linked = db.execute("SELECT id FROM credit_lines WHERE id = ?", (values["credit_line_id"],)).fetchone()
+                if not linked:
+                    raise ValueError("The selected credit line no longer exists")
+            if table == "credit_lines":
+                duplicate = db.execute(
+                    "SELECT id FROM credit_lines WHERE lower(name) = lower(?) AND id != ?",
+                    (values["name"], item_id or 0),
+                ).fetchone()
+                if duplicate:
+                    raise ValueError("A credit line with that name already exists")
             if item_id is None:
                 placeholders = ", ".join("?" for _ in fields)
                 cursor = db.execute(
@@ -270,9 +319,14 @@ class Store:
             return dict(row)
 
     def delete_item(self, table: str, item_id: int) -> None:
-        if table not in {"recurring_items", "transactions"}:
+        if table not in {"recurring_items", "transactions", "credit_lines"}:
             raise ValueError("Invalid item type")
         with self.connect() as db:
+            if table == "credit_lines":
+                db.execute(
+                    "UPDATE recurring_items SET funding_source = 'checking', credit_line_id = NULL WHERE credit_line_id = ?",
+                    (item_id,),
+                )
             cursor = db.execute(f"DELETE FROM {table} WHERE id = ?", (item_id,))
             if cursor.rowcount == 0:
                 raise KeyError("Item not found")
@@ -284,7 +338,13 @@ class Store:
         events: list[dict] = []
 
         with self.connect() as db:
-            recurring = db.execute("SELECT * FROM recurring_items WHERE active = 1").fetchall()
+            recurring = db.execute(
+                """SELECT recurring_items.*, credit_lines.name AS credit_line_name
+                   FROM recurring_items
+                   LEFT JOIN credit_lines ON credit_lines.id = recurring_items.credit_line_id
+                   WHERE recurring_items.active = 1"""
+            ).fetchall()
+            credit_lines = [dict(row) for row in db.execute("SELECT * FROM credit_lines ORDER BY name")]
             transactions = db.execute(
                 "SELECT * FROM transactions WHERE date BETWEEN ? AND ? ORDER BY date, id",
                 (start.isoformat(), end.isoformat()),
@@ -327,7 +387,8 @@ class Store:
             week_end = week_start + timedelta(days=6)
             week_events = [event for event in events if week_start.isoformat() <= event["date"] <= week_end.isoformat()]
             income = money(sum(event["amount"] for event in week_events if event["kind"] == "income"))
-            expenses = money(sum(event["amount"] for event in week_events if event["kind"] == "expense"))
+            expenses = money(sum(event["amount"] for event in week_events if event["kind"] == "expense" and event["funding_source"] == "checking"))
+            card_charges = money(sum(event["amount"] for event in week_events if event["kind"] == "expense" and event["funding_source"] == "credit"))
             opening = running
             running = money(running + income - expenses)
             lowest = min(lowest, running)
@@ -337,8 +398,21 @@ class Store:
                 "opening_balance": opening,
                 "income": income,
                 "expenses": expenses,
+                "card_charges": card_charges,
                 "closing_balance": running,
                 "events": week_events,
+            })
+
+        projected_cards = []
+        for card in credit_lines:
+            scheduled_charges = money(sum(
+                event["amount"] for event in events
+                if event["funding_source"] == "credit" and event["credit_line_id"] == card["id"]
+            ))
+            projected_cards.append({
+                **card,
+                "scheduled_charges": scheduled_charges,
+                "projected_balance": money(card["balance"] + scheduled_charges),
             })
 
         return {
@@ -349,6 +423,7 @@ class Store:
             "lowest_balance": money(lowest),
             "next_income": next_income,
             "balance_before_next_income": balance_before_next_income,
+            "credit_lines": projected_cards,
             "weeks": week_rows,
         }
 
@@ -455,6 +530,34 @@ def validate_amount(value: object) -> float:
     return amount
 
 
+def validate_nonnegative(value: object, field: str) -> float:
+    try:
+        amount = money(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a number") from exc
+    if amount < 0 or amount > 100_000_000:
+        raise ValueError(f"{field} cannot be negative")
+    return amount
+
+
+def validate_optional_nonnegative(value: object, field: str) -> float | None:
+    if value in {None, ""}:
+        return None
+    return validate_nonnegative(value, field)
+
+
+def parse_optional_id(value: object) -> int | None:
+    if value in {None, ""}:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid credit line") from exc
+    if parsed <= 0:
+        raise ValueError("Invalid credit line")
+    return parsed
+
+
 def validate_optional_int(value: object, choices: Iterable[int], field: str) -> int | None:
     if value in {None, ""}:
         return None
@@ -470,16 +573,23 @@ def validate_optional_int(value: object, choices: Iterable[int], field: str) -> 
 def event_from_row(row: sqlite3.Row, day: date, source: str) -> dict:
     amount = money(row["amount"])
     kind = row["kind"]
+    funding_source = row["funding_source"] if source == "recurring" else "checking"
+    credit_line_id = row["credit_line_id"] if source == "recurring" else None
+    credit_line_name = row["credit_line_name"] if source == "recurring" else None
+    cash_effect = kind == "income" or funding_source == "checking"
     return {
         "id": row["id"],
         "name": row["name"],
         "kind": kind,
         "amount": amount,
-        "signed_amount": amount if kind == "income" else -amount,
+        "signed_amount": (amount if kind == "income" else -amount) if cash_effect else 0,
         "date": day.isoformat(),
         "source": source,
         "status": row["status"] if source == "transaction" else "recurring",
         "note": row["note"],
+        "funding_source": funding_source,
+        "credit_line_id": credit_line_id,
+        "credit_line_name": credit_line_name,
     }
 
 
