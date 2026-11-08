@@ -6,6 +6,18 @@ const shortDate = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numer
 const longDate = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' });
 
+function applyTheme(theme) {
+  const resolved = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = resolved;
+  localStorage.setItem('truenorth-theme', resolved);
+  const toggle = $('#themeToggle');
+  const dark = resolved === 'dark';
+  toggle.setAttribute('aria-pressed', String(dark));
+  toggle.setAttribute('aria-label', `Use ${dark ? 'light' : 'dark'} theme`);
+  toggle.querySelector('span').textContent = dark ? '☀' : '☾';
+  $('meta[name="theme-color"]').content = dark ? '#111e19' : '#10271f';
+}
+
 function localISODate() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -189,15 +201,18 @@ function toast(message, error = false) {
 }
 
 document.addEventListener('click', event => {
+  const close = event.target.closest('[data-dialog-close]'); if (close) { close.closest('dialog').close(); return; }
   const tab = event.target.closest('[data-view]'); if (tab) switchView(tab.dataset.view);
   const add = event.target.closest('[data-add-type]'); if (add) openItemDialog(add.dataset.addType);
   const menu = event.target.closest('[data-menu-type]'); if (menu) editOrDelete(menu.dataset.menuType, menu.dataset.id);
   const week = event.target.closest('.week-summary'); if (week) { const row = week.closest('.week-row'); row.classList.toggle('open'); week.setAttribute('aria-expanded', row.classList.contains('open')); }
 });
+$('#themeToggle').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
 $('#quickAdd').addEventListener('click', () => openItemDialog(state.view === 'one-time' ? 'transaction' : 'recurring'));
 $('#adjustBalance').addEventListener('click', openBalanceDialog);
 $('#forecastStart').addEventListener('change', () => loadProjection().catch(error => toast(error.message, true)));
 $('#itemForm').addEventListener('submit', saveItem);
 $('#balanceForm').addEventListener('submit', saveBalance);
+applyTheme(document.documentElement.dataset.theme);
 load();
 

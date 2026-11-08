@@ -22,6 +22,7 @@ On the first run, if `resources/Finances - Winter '26_'27.csv` exists, its dated
 - See a 12-week running cash-flow forecast and the lowest projected balance.
 - See exactly how much remains immediately before the next expected income.
 - Edit, pause, or delete recurring rules and one-time items.
+- Switch between light and dark themes; the preference is remembered locally.
 - Keep all information locally in SQLite.
 
 ## Tests

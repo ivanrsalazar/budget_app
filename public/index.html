@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#10271f">
   <meta name="description" content="A local-first week-by-week cash flow planner.">
   <title>TrueNorth Budget</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem('truenorth-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
@@ -23,6 +24,7 @@
         <button class="tab" data-view="plan">Recurring plan</button>
         <button class="tab" data-view="one-time">One-time</button>
       </nav>
+      <button class="theme-toggle" id="themeToggle" type="button" aria-label="Use dark theme" aria-pressed="false"><span aria-hidden="true">☾</span></button>
       <button class="button button-primary compact" id="quickAdd">+ Add item</button>
     </header>
 
@@ -89,7 +91,7 @@
     <form method="dialog" id="itemForm">
       <div class="dialog-head">
         <div><p class="eyebrow" id="dialogEyebrow">NEW PLAN ITEM</p><h2 id="dialogTitle">Add recurring item</h2></div>
-        <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        <button class="icon-button" type="button" data-dialog-close aria-label="Close">×</button>
       </div>
       <input type="hidden" name="id">
       <input type="hidden" name="item_type">
@@ -110,17 +112,17 @@
       </div>
       <label class="field wide">Note <small>optional</small><textarea name="note" rows="2" maxlength="500" placeholder="Anything useful to remember"></textarea></label>
       <label class="active-check recurring-only"><input type="checkbox" name="active" checked><span>Include this item in forecasts</span></label>
-      <div class="dialog-actions"><button class="button button-ghost" value="cancel">Cancel</button><button class="button button-primary" type="submit" value="default">Save item</button></div>
+      <div class="dialog-actions"><button class="button button-ghost" type="button" data-dialog-close>Cancel</button><button class="button button-primary" type="submit" value="default">Save item</button></div>
     </form>
   </dialog>
 
   <dialog id="balanceDialog">
     <form method="dialog" id="balanceForm">
-      <div class="dialog-head"><div><p class="eyebrow">STARTING POINT</p><h2>Adjust current balance</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <div class="dialog-head"><div><p class="eyebrow">STARTING POINT</p><h2>Adjust current balance</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close">×</button></div>
       <p class="dialog-copy">Use the total cash you can actually spend across the accounts you want this plan to cover.</p>
       <label class="field wide">Available now<span class="money-input large"><b>$</b><input name="current_balance" type="number" step="0.01" required></span></label>
       <label class="field wide">Balance accurate as of<input name="balance_as_of" type="date" required></label>
-      <div class="dialog-actions"><button class="button button-ghost" value="cancel">Cancel</button><button class="button button-primary" type="submit" value="default">Update forecast</button></div>
+      <div class="dialog-actions"><button class="button button-ghost" type="button" data-dialog-close>Cancel</button><button class="button button-primary" type="submit" value="default">Update forecast</button></div>
     </form>
   </dialog>
 
