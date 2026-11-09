@@ -12,6 +12,35 @@ python3 server.py
 
 Open <http://127.0.0.1:8000>. The database is created at `data/budget.db` and is intentionally ignored by Git.
 
+### Run in the background on a custom port
+
+From the project directory, this example starts the app on port `8123`, writes output to `budget.log`, and saves the process ID to `budget.pid`:
+
+```bash
+BUDGET_PORT=8123 nohup python3 server.py > budget.log 2>&1 & echo $! > budget.pid
+```
+
+Open <http://127.0.0.1:8123>. Change `8123` to any available port. The default host remains `127.0.0.1`, so the app is only accessible from your computer.
+
+Check whether the process is running:
+
+```bash
+ps -p "$(cat budget.pid)"
+```
+
+Follow the application logs:
+
+```bash
+tail -f budget.log
+```
+
+Stop the background process and remove the saved process ID:
+
+```bash
+kill "$(cat budget.pid)"
+rm budget.pid
+```
+
 On the first run, if `resources/Finances - Winter '26_'27.csv` exists, its dated expense rows are imported once as planned one-time items. The starting balance is initialized from the first week's calculated `Left` amount (or its opening amount if no remainder exists). The CSV itself is ignored because it contains private financial data.
 
 ## Features
