@@ -118,8 +118,10 @@ function populateFundingOptions() {
 function updateFundingField() {
   const form = $('#itemForm');
   const expense = form.elements.kind.value === 'expense';
+  const paidFromChecking = form.elements.funding_account.value === 'checking';
+  if (!paidFromChecking) form.elements.payment_target.value = 'none';
   const hasTarget = form.elements.payment_target.value !== 'none';
-  $$('.expense-target', form).forEach(el => el.classList.toggle('hidden', !expense));
+  $$('.expense-target', form).forEach(el => el.classList.toggle('hidden', !(expense && paidFromChecking)));
   $$('.expense-funding', form).forEach(el => el.classList.toggle('hidden', !(expense && !hasTarget)));
   if (hasTarget) form.elements.funding_account.value = 'checking';
 }
@@ -383,6 +385,7 @@ $('#adjustBalance').addEventListener('click', openBalanceDialog);
 $('#forecastStart').addEventListener('change', () => loadProjection().catch(error => toast(error.message, true)));
 $('#scheduleType').addEventListener('change', updateScheduleFields);
 $('#paymentTarget').addEventListener('change', updateFundingField);
+$('#fundingAccount').addEventListener('change', updateFundingField);
 $$('input[name="kind"]', $('#itemForm')).forEach(input => input.addEventListener('change', updateFundingField));
 $('#itemForm').addEventListener('submit', saveItem);
 $('#balanceForm').addEventListener('submit', saveBalance);

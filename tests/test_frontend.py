@@ -35,6 +35,12 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('class="field wide expense-funding"', markup)
         self.assertIn('name="payment_target"', markup)
 
+    def test_card_funded_expense_hides_and_clears_payment_destination(self):
+        script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("const paidFromChecking = form.elements.funding_account.value === 'checking'", script)
+        self.assertIn("if (!paidFromChecking) form.elements.payment_target.value = 'none'", script)
+        self.assertIn("$('#fundingAccount').addEventListener('change', updateFundingField)", script)
+
     def test_calendar_renders_daily_running_checking_balance(self):
         script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
         styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")
