@@ -163,6 +163,7 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(updated["credit_line_id"])
 
     def test_spendable_before_payday_includes_credit_aware_comparison(self):
+        self.store.update_settings({"auto_pay_card_charges": False})
         card = self.store.save_item("credit_lines", {"name": "Discover", "balance": 0})
         self.store.save_item("recurring_items", {
             "name": "Paycheck", "kind": "income", "amount": 2000,
@@ -181,6 +182,35 @@ class StoreTests(unittest.TestCase):
         result = self.store.projection(date(2026, 11, 1), 2)
         self.assertEqual(result["balance_before_next_income"], 1000)
         self.assertEqual(result["balance_before_next_income_after_card_charges"], 700)
+
+    def test_monday_payoff_moves_prior_week_card_charges_to_checking(self):
+        card = self.store.save_item("credit_lines", {"name": "Discover", "balance": 250})
+        for name, amount, purchase_date in (
+            ("Flight", 200, "2026-11-03"),
+            ("Dinner", 50, "2026-11-08"),
+        ):
+            self.store.save_item("transactions", {
+                "name": name, "kind": "expense", "amount": amount,
+                "date": purchase_date, "status": "planned",
+                "funding_source": "credit", "credit_line_id": card["id"],
+            })
+
+        result = self.store.projection(date(2026, 11, 9), 1)
+        payoff = result["weeks"][0]["events"][0]
+        self.assertEqual(payoff["source"], "auto_card_payment")
+        self.assertEqual(payoff["date"], "2026-11-09")
+        self.assertEqual(payoff["amount"], 250)
+        self.assertEqual(payoff["destination_credit_line_id"], card["id"])
+        self.assertEqual(result["weeks"][0]["expenses"], 250)
+        self.assertEqual(result["weeks"][0]["card_payments"], 250)
+        self.assertEqual(result["ending_balance"], 750)
+        self.assertEqual(result["credit_lines"][0]["projected_balance"], 0)
+
+        settings = self.store.update_settings({"auto_pay_card_charges": False})
+        self.assertFalse(settings["auto_pay_card_charges"])
+        disabled = self.store.projection(date(2026, 11, 9), 1)
+        self.assertEqual(disabled["weeks"][0]["events"], [])
+        self.assertEqual(disabled["ending_balance"], 1000)
 
     def test_sample_import_is_idempotent(self):
         sample = Path(self.temp.name) / "sample.csv"

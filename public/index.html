@@ -41,6 +41,10 @@
           <label class="date-control">Forecast from
             <input type="date" id="forecastStart">
           </label>
+          <label class="auto-pay-toggle">
+            <input type="checkbox" data-auto-pay-toggle>
+            <span><b>Monday card payoff</b><small>Pay the prior week’s card charges from Checking</small></span>
+          </label>
           <button class="button button-ghost" id="adjustBalance">Adjust balance</button>
         </div>
       </section>
@@ -48,7 +52,13 @@
       <section class="view hidden" data-view-panel="calendar">
         <div class="page-heading calendar-heading">
           <div><p class="eyebrow">MONTH AT A GLANCE</p><h1>Calendar</h1><p>See cash activity and card charges on the exact days they land.</p></div>
-          <div class="month-controls"><button class="icon-button" id="previousMonth" type="button" aria-label="Previous month">‹</button><strong id="calendarMonth"></strong><button class="icon-button" id="nextMonth" type="button" aria-label="Next month">›</button></div>
+          <div class="calendar-actions">
+            <label class="auto-pay-toggle">
+              <input type="checkbox" data-auto-pay-toggle>
+              <span><b>Monday card payoff</b><small>Pay the prior week’s card charges from Checking</small></span>
+            </label>
+            <div class="month-controls"><button class="icon-button" id="previousMonth" type="button" aria-label="Previous month">‹</button><strong id="calendarMonth"></strong><button class="icon-button" id="nextMonth" type="button" aria-label="Next month">›</button></div>
+          </div>
         </div>
         <div class="calendar-wrap">
           <div class="calendar-weekdays" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>

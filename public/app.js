@@ -55,6 +55,7 @@ async function load() {
   try {
     const data = await api('/api/bootstrap');
     Object.assign(state, data);
+    syncAutoPayToggles();
     state.calendarDate = new Date(`${localISODate().slice(0, 7)}-01T00:00:00Z`);
     populateFundingOptions();
     $('#forecastStart').value = localISODate();
@@ -89,7 +90,7 @@ function renderProjection() {
   $('#weekList').innerHTML = p.weeks.map((week, index) => {
     const events = week.events.map(event => `<div class="event">
       <span class="event-date">${weekday.format(asUTC(event.date))}, ${shortDate.format(asUTC(event.date))}</span>
-      <span><b>${escapeHTML(event.name)}</b><br><span class="event-source">${event.destination_credit_line_id ? `Payment to ${escapeHTML(event.destination_credit_line_name)}` : event.funding_source === 'credit' ? `Charged to ${escapeHTML(event.credit_line_name)}` : event.source === 'recurring' ? 'From Checking · Recurring' : event.status}</span></span>
+      <span><b>${escapeHTML(event.name)}</b><br><span class="event-source">${event.source === 'auto_card_payment' ? `Automatic Monday payoff · Checking to ${escapeHTML(event.destination_credit_line_name)}` : event.destination_credit_line_id ? `Payment to ${escapeHTML(event.destination_credit_line_name)}` : event.funding_source === 'credit' ? `Charged to ${escapeHTML(event.credit_line_name)}` : event.source === 'recurring' ? 'From Checking · Recurring' : event.status}</span></span>
       <b class="event-amount ${event.kind}">${signed(event.amount, event.kind)}</b>
     </div>`).join('') || '<div class="empty-week">No planned activity this week.</div>';
     return `<article class="week-row ${index === 0 ? 'open' : ''}">
@@ -223,6 +224,7 @@ async function saveItem(event) {
 async function refreshAll() {
   const data = await api('/api/bootstrap');
   Object.assign(state, data);
+  syncAutoPayToggles();
   populateFundingOptions();
   renderLists();
   await loadProjection();
@@ -283,7 +285,7 @@ function renderCalendar(gridStart) {
   for (let index = 0; index < 42; index += 1) {
     const day = new Date(gridStart); day.setUTCDate(gridStart.getUTCDate() + index);
     const iso = isoUTC(day);
-    if (day.getUTCDay() === 0) weeklyCardCharges = 0;
+    if (day.getUTCDay() === 1) weeklyCardCharges = 0;
     weeklyCardCharges = Math.round((weeklyCardCharges + (eventsByDate[iso] || []).reduce((sum, event) => sum + (event.funding_source === 'credit' ? event.amount : 0), 0)) * 100) / 100;
     if (balancesByDate[iso] != null) balancesAfterCardChargesByDate[iso] = Math.round((balancesByDate[iso] - weeklyCardCharges) * 100) / 100;
   }
@@ -307,6 +309,9 @@ function openCalendarDay(dateValue) {
   const events = state.calendarProjection.weeks.flatMap(week => week.events).filter(event => event.date === dateValue);
   $('#dayDialogTitle').textContent = longDate.format(asUTC(dateValue));
   $('#dayDialogEvents').innerHTML = events.length ? events.map(event => {
+    if (event.source === 'auto_card_payment') {
+      return `<article class="day-dialog-item automatic"><div><b>${escapeHTML(event.name)}</b><span>Automatic Monday payoff · controlled by the view toggle</span></div><strong class="expense">${signed(event.amount, event.kind)}</strong></article>`;
+    }
     const type = event.source === 'recurring' ? 'recurring' : 'transaction';
     const detail = type === 'recurring' ? 'Recurring rule · changes affect every occurrence' : `${event.status} one-time item`;
     return `<article class="day-dialog-item"><div><b>${escapeHTML(event.name)}</b><span>${detail}</span></div><strong class="${event.kind}">${signed(event.amount, event.kind)}</strong>${itemActionMenu(type, event)}</article>`;
@@ -403,6 +408,24 @@ async function saveBalance(event) {
   } catch (error) { toast(error.message, true); }
 }
 
+function syncAutoPayToggles() {
+  $$('[data-auto-pay-toggle]').forEach(toggle => { toggle.checked = Boolean(state.settings?.auto_pay_card_charges); });
+}
+
+async function setAutoPay(enabled) {
+  try {
+    state.settings = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ auto_pay_card_charges: enabled }) });
+    syncAutoPayToggles();
+    await loadProjection();
+    if (state.view === 'calendar') await loadCalendar();
+    renderCards();
+    toast(enabled ? 'Monday card payoff enabled' : 'Monday card payoff disabled');
+  } catch (error) {
+    syncAutoPayToggles();
+    toast(error.message, true);
+  }
+}
+
 let toastTimer;
 function toast(message, error = false) {
   const el = $('#toast'); el.textContent = message; el.classList.toggle('error', error); el.classList.add('show');
@@ -427,6 +450,7 @@ $('#themeToggle').addEventListener('click', () => applyTheme(document.documentEl
 $('#quickAdd').addEventListener('click', () => state.view === 'cards' ? openCreditDialog() : openItemDialog(state.view === 'one-time' ? 'transaction' : 'recurring'));
 $('#adjustBalance').addEventListener('click', openBalanceDialog);
 $('#forecastStart').addEventListener('change', () => loadProjection().catch(error => toast(error.message, true)));
+$$('[data-auto-pay-toggle]').forEach(toggle => toggle.addEventListener('change', () => setAutoPay(toggle.checked)));
 $('#scheduleType').addEventListener('change', updateScheduleFields);
 $('#paymentTarget').addEventListener('change', updateFundingField);
 $('#fundingAccount').addEventListener('change', updateFundingField);

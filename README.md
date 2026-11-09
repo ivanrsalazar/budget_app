@@ -54,6 +54,7 @@ On the first run, if `resources/Finances - Winter '26_'27.csv` exists, its dated
 - Track credit-card balances, limits, APRs, due days, and minimum payments.
 - Assign recurring or one-time expenses to Checking or a saved credit line.
 - Direct one-time or recurring card payments to a saved credit line to reduce its projected debt.
+- Optionally assume each Monday pays off the prior Monday–Sunday card charges from Checking; the persistent toggle is available in both Forecast and Calendar.
 - See exactly how much remains immediately before the next expected income.
 - Compare spendable cash with a conservative figure that reserves for the current calendar week's planned credit-card charges.
 - Edit, pause, or delete recurring rules and one-time items.

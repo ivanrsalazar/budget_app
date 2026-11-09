@@ -67,8 +67,17 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('class="balance-tooltip"', script)
         self.assertIn('class="event-tooltip"', script)
         self.assertIn("cardBalanceAfterPayment", script)
-        self.assertIn("if (day.getUTCDay() === 0) weeklyCardCharges = 0", script)
+        self.assertIn("if (day.getUTCDay() === 1) weeklyCardCharges = 0", script)
         self.assertIn(".calendar-event:hover .event-tooltip", styles)
+
+    def test_monday_card_payoff_toggle_is_available_in_both_views(self):
+        markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
+        script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        self.assertEqual(markup.count('data-auto-pay-toggle'), 2)
+        self.assertIn("function syncAutoPayToggles()", script)
+        self.assertIn("auto_pay_card_charges: enabled", script)
+        self.assertIn("event.source === 'auto_card_payment'", script)
+        self.assertIn("controlled by the view toggle", script)
 
     def test_item_actions_use_visible_menu_instead_of_typed_prompt(self):
         script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")

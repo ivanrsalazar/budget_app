@@ -202,6 +202,7 @@ class Store:
                 "current_balance": "0",
                 "balance_as_of": iso_today(),
                 "sample_imported": "0",
+                "auto_pay_card_charges": "1",
             }
             for key, value in defaults.items():
                 db.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
@@ -216,14 +217,20 @@ class Store:
             "current_balance": money(values.get("current_balance", 0)),
             "balance_as_of": values.get("balance_as_of", iso_today()),
             "sample_imported": values.get("sample_imported") == "1",
+            "auto_pay_card_charges": values.get("auto_pay_card_charges", "1") == "1",
         }
 
     def update_settings(self, payload: dict) -> dict:
-        balance = money(payload["current_balance"])
-        as_of = parse_date(payload["balance_as_of"]).isoformat()
         with self.connect() as db:
-            db.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('current_balance', ?)", (str(balance),))
-            db.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('balance_as_of', ?)", (as_of,))
+            if "current_balance" in payload:
+                balance = money(payload["current_balance"])
+                db.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('current_balance', ?)", (str(balance),))
+            if "balance_as_of" in payload:
+                as_of = parse_date(payload["balance_as_of"]).isoformat()
+                db.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('balance_as_of', ?)", (as_of,))
+            if "auto_pay_card_charges" in payload:
+                enabled = "1" if bool(payload["auto_pay_card_charges"]) else "0"
+                db.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('auto_pay_card_charges', ?)", (enabled,))
         return self.settings()
 
     def list_items(self, table: str) -> list[dict]:
@@ -385,6 +392,7 @@ class Store:
         weeks = max(1, min(52, weeks))
         end = start + timedelta(days=weeks * 7 - 1)
         settings = self.settings()
+        source_start = start - timedelta(days=7) if settings["auto_pay_card_charges"] else start
         events: list[dict] = []
 
         with self.connect() as db:
@@ -404,13 +412,13 @@ class Store:
                    LEFT JOIN credit_lines AS source_card ON source_card.id = transactions.credit_line_id
                    LEFT JOIN credit_lines AS target_card ON target_card.id = transactions.destination_credit_line_id
                    WHERE date BETWEEN ? AND ? ORDER BY date, transactions.id""",
-                (start.isoformat(), end.isoformat()),
+                (source_start.isoformat(), end.isoformat()),
             ).fetchall()
 
         for row in recurring:
             item_start = parse_date(row["start_date"])
             item_end = min(end, parse_date(row["end_date"])) if row["end_date"] else end
-            if item_end < start:
+            if item_end < source_start:
                 continue
             for occurrence in scheduled_occurrences(
                 item_start,
@@ -418,7 +426,7 @@ class Store:
                 row["schedule_type"],
                 row["weekday"],
                 row["ordinal"],
-                start,
+                source_start,
                 item_end,
             ):
                 events.append(event_from_row(row, occurrence, "recurring"))
@@ -426,7 +434,47 @@ class Store:
         for row in transactions:
             events.append(event_from_row(row, parse_date(row["date"]), "transaction"))
 
-        events.sort(key=lambda item: (item["date"], 0 if item["kind"] == "income" else 1, item["name"].lower()))
+        if settings["auto_pay_card_charges"]:
+            cards_by_id = {card["id"]: card for card in credit_lines}
+            weekly_charges: dict[tuple[int, date], float] = {}
+            for event in events:
+                if event["kind"] != "expense" or event["funding_source"] != "credit" or not event["credit_line_id"]:
+                    continue
+                event_day = parse_date(event["date"])
+                week_start = event_day - timedelta(days=event_day.weekday())
+                key = (event["credit_line_id"], week_start)
+                weekly_charges[key] = money(weekly_charges.get(key, 0) + event["amount"])
+            for (card_id, week_start), amount in weekly_charges.items():
+                payment_day = week_start + timedelta(days=7)
+                if not (start <= payment_day <= end) or amount <= 0:
+                    continue
+                card = cards_by_id.get(card_id)
+                if not card:
+                    continue
+                events.append({
+                    "id": f"auto-{card_id}-{payment_day.isoformat()}",
+                    "name": f"Weekly {card['name']} payoff",
+                    "kind": "expense",
+                    "amount": amount,
+                    "signed_amount": -amount,
+                    "date": payment_day.isoformat(),
+                    "source": "auto_card_payment",
+                    "status": "automatic",
+                    "note": "Automatic payoff of the prior Monday–Sunday card charges",
+                    "funding_source": "checking",
+                    "credit_line_id": None,
+                    "credit_line_name": None,
+                    "destination_credit_line_id": card_id,
+                    "destination_credit_line_name": card["name"],
+                })
+
+        events = [event for event in events if start.isoformat() <= event["date"] <= end.isoformat()]
+
+        events.sort(key=lambda item: (
+            item["date"],
+            0 if item["kind"] == "income" else 1 if item["source"] == "auto_card_payment" else 2,
+            item["name"].lower(),
+        ))
         running = money(settings["current_balance"])
         lowest = running
         next_income = next((event for event in events if event["kind"] == "income"), None)
@@ -437,9 +485,9 @@ class Store:
             running += event["signed_amount"]
             balance_before_next_income = money(running)
 
-        current_week_end = start + timedelta(days=(5 - start.weekday()) % 7)
+        current_week_end = start + timedelta(days=(6 - start.weekday()) % 7)
         comparison_cutoff = parse_date(next_income["date"]) if next_income else min(end, current_week_end)
-        comparison_week_start = comparison_cutoff - timedelta(days=(comparison_cutoff.weekday() + 1) % 7)
+        comparison_week_start = comparison_cutoff - timedelta(days=comparison_cutoff.weekday())
         weekly_card_charges = money(sum(
             event["amount"] for event in events
             if event["funding_source"] == "credit"
