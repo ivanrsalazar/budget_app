@@ -66,6 +66,7 @@ h1 em { color: var(--green); font-family: Georgia, serif; font-weight: 400; }
 .legend span { display: flex; align-items: center; gap: 7px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .dot.income { background: var(--green); }.dot.expense { background: var(--coral); }
+.dot.charge { background: #8a62b8; }.dot.payment { background: #3c78bd; }
 .week-list { padding: 0 clamp(24px, 7vw, 105px) 80px; }
 .week-row { border-top: 1px solid var(--line); }
 .week-summary { width: 100%; padding: 21px 4px; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr 30px; gap: 14px; align-items: center; border: 0; background: transparent; text-align: left; color: var(--ink); }
@@ -81,6 +82,8 @@ h1 em { color: var(--green); font-family: Georgia, serif; font-weight: 400; }
 .event-list { display: none; padding: 0 6px 22px 28%; }.week-row.open .event-list { display: block; }
 .event { display: grid; grid-template-columns: 90px 1fr auto; gap: 18px; padding: 10px 0; border-bottom: 1px dashed #ddd9cd; font-size: 13px; }.event:last-child { border: 0; }
 .event-date, .event-source { color: var(--muted); }.event-amount.income { color: var(--green); }.event-amount.expense { color: #b55747; }
+.event-amount-block { min-width: 126px; display: grid; justify-items: end; gap: 3px; }.event-checking { color: var(--muted); font-size: 9px; font-weight: 700; white-space: nowrap; }.event-checking.negative { color: var(--coral); }
+.event.card-charge { padding-left: 9px; border-left: 3px solid #8a62b8; }.event.card-payment { padding-left: 9px; border-left: 3px solid #3c78bd; }.event-amount.card-charge, .event.card-charge .event-source { color: #7950a5; }.event-amount.card-payment, .event.card-payment .event-source { color: #326da9; }
 .empty-week { color: var(--muted); font-size: 13px; font-style: italic; }
 .page-heading { padding: 65px clamp(24px, 7vw, 105px) 38px; display: flex; justify-content: space-between; align-items: flex-end; gap: 25px; background: var(--mint); border-bottom: 1px solid #d7ded0; }
 .page-heading h1 { font-size: 48px; }.page-heading p:last-child { color: var(--muted); margin-bottom: 0; }
@@ -160,6 +163,8 @@ html[data-theme="dark"] .metric-featured .metric-note { color: #b6c8bf; }
 html[data-theme="dark"] .metric-card { box-shadow: 0 8px 25px rgba(0,0,0,.12); }
 html[data-theme="dark"] .page-heading { border-color: var(--line); }
 html[data-theme="dark"] .event { border-color: #304139; }
+html[data-theme="dark"] .event-amount.card-charge, html[data-theme="dark"] .event.card-charge .event-source { color: #c6a7e6; }
+html[data-theme="dark"] .event-amount.card-payment, html[data-theme="dark"] .event.card-payment .event-source { color: #8eb9e9; }
 html[data-theme="dark"] dialog::backdrop { background: rgba(0,0,0,.68); }
 html[data-theme="dark"] .field input,
 html[data-theme="dark"] .field select,

@@ -88,11 +88,16 @@ function renderProjection() {
   </article>`).join('');
 
   $('#weekList').innerHTML = p.weeks.map((week, index) => {
-    const events = week.events.map(event => `<div class="event">
-      <span class="event-date">${weekday.format(asUTC(event.date))}, ${shortDate.format(asUTC(event.date))}</span>
-      <span><b>${escapeHTML(event.name)}</b><br><span class="event-source">${event.source === 'auto_card_payment' ? `Automatic Monday payoff · Checking to ${escapeHTML(event.destination_credit_line_name)}` : event.destination_credit_line_id ? `Payment to ${escapeHTML(event.destination_credit_line_name)}` : event.funding_source === 'credit' ? `Charged to ${escapeHTML(event.credit_line_name)}` : event.source === 'recurring' ? 'From Checking · Recurring' : event.status}</span></span>
-      <b class="event-amount ${event.kind}">${signed(event.amount, event.kind)}</b>
-    </div>`).join('') || '<div class="empty-week">No planned activity this week.</div>';
+    let eventCheckingBalance = week.opening_balance;
+    const events = week.events.map(event => {
+      eventCheckingBalance = Math.round((eventCheckingBalance + event.signed_amount) * 100) / 100;
+      const cardClass = event.funding_source === 'credit' ? 'card-charge' : event.destination_credit_line_id ? 'card-payment' : '';
+      return `<div class="event ${cardClass}">
+        <span class="event-date">${weekday.format(asUTC(event.date))}, ${shortDate.format(asUTC(event.date))}</span>
+        <span><b>${escapeHTML(event.name)}</b><br><span class="event-source">${event.source === 'auto_card_payment' ? `Automatic Monday payoff · Checking to ${escapeHTML(event.destination_credit_line_name)}` : event.destination_credit_line_id ? `Payment to ${escapeHTML(event.destination_credit_line_name)}` : event.funding_source === 'credit' ? `Charged to ${escapeHTML(event.credit_line_name)}` : event.source === 'recurring' ? 'From Checking · Recurring' : event.status}</span></span>
+        <span class="event-amount-block"><b class="event-amount ${event.kind} ${cardClass}">${signed(event.amount, event.kind)}</b><small class="event-checking ${eventCheckingBalance < 0 ? 'negative' : ''}">Checking ${money.format(eventCheckingBalance)}</small></span>
+      </div>`;
+    }).join('') || '<div class="empty-week">No planned activity this week.</div>';
     return `<article class="week-row ${index === 0 ? 'open' : ''}">
       <button class="week-summary with-cards" aria-expanded="${index === 0}">
         <span class="week-name">${index === 0 ? 'This week' : `Week ${index + 1}`}<span class="week-dates">${shortDate.format(asUTC(week.start))} – ${longDate.format(asUTC(week.end))}</span></span>

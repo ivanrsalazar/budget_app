@@ -79,6 +79,18 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn("event.source === 'auto_card_payment'", script)
         self.assertIn("controlled by the view toggle", script)
 
+    def test_forecast_events_show_checking_balance_and_card_colors(self):
+        script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("let eventCheckingBalance = week.opening_balance", script)
+        self.assertIn('class="event-checking', script)
+        self.assertIn("event.funding_source === 'credit' ? 'card-charge'", script)
+        self.assertIn("event.destination_credit_line_id ? 'card-payment'", script)
+        self.assertIn(".event.card-charge", styles)
+        self.assertIn(".event.card-payment", styles)
+        self.assertIn('<i class="dot charge"></i>Card charge', markup := (ROOT / "public" / "index.html").read_text(encoding="utf-8"))
+        self.assertIn('<i class="dot payment"></i>Card payment', markup)
+
     def test_item_actions_use_visible_menu_instead_of_typed_prompt(self):
         script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
         styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")
