@@ -54,6 +54,7 @@ On the first run, if `resources/Finances - Winter '26_'27.csv` exists, its dated
 - Assign recurring or one-time expenses to Checking or a saved credit line.
 - Direct one-time or recurring card payments to a saved credit line to reduce its projected debt.
 - See exactly how much remains immediately before the next expected income.
+- Compare spendable cash with a conservative figure that also reserves for planned credit-card charges.
 - Edit, pause, or delete recurring rules and one-time items.
 - Switch between light and dark themes; the preference is remembered locally.
 - Keep all information locally in SQLite.

@@ -49,6 +49,16 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('class="day-balance', script)
         self.assertIn(".day-balance", styles)
 
+    def test_credit_aware_metric_and_calendar_hover_details_are_rendered(self):
+        script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("balance_before_next_income_after_card_charges", script)
+        self.assertIn('class="metric-comparison"', script)
+        self.assertIn('class="balance-tooltip"', script)
+        self.assertIn('class="event-tooltip"', script)
+        self.assertIn("cardBalanceAfterPayment", script)
+        self.assertIn(".calendar-event:hover .event-tooltip", styles)
+
     def test_item_actions_use_visible_menu_instead_of_typed_prompt(self):
         script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
         styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")

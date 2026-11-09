@@ -431,11 +431,17 @@ class Store:
         lowest = running
         next_income = next((event for event in events if event["kind"] == "income"), None)
         balance_before_next_income = running
+        balance_before_next_income_after_card_charges = running
         for event in events:
             if next_income and event is next_income:
                 break
             running += event["signed_amount"]
             balance_before_next_income = money(running)
+            balance_before_next_income_after_card_charges = money(
+                balance_before_next_income_after_card_charges
+                + event["signed_amount"]
+                - (event["amount"] if event["funding_source"] == "credit" else 0)
+            )
 
         running = money(settings["current_balance"])
         week_rows = []
@@ -487,6 +493,7 @@ class Store:
             "lowest_balance": money(lowest),
             "next_income": next_income,
             "balance_before_next_income": balance_before_next_income,
+            "balance_before_next_income_after_card_charges": balance_before_next_income_after_card_charges,
             "credit_lines": projected_cards,
             "weeks": week_rows,
         }

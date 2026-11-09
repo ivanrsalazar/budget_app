@@ -162,6 +162,21 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(updated["funding_source"], "checking")
         self.assertIsNone(updated["credit_line_id"])
 
+    def test_spendable_before_payday_includes_credit_aware_comparison(self):
+        card = self.store.save_item("credit_lines", {"name": "Discover", "balance": 0})
+        self.store.save_item("recurring_items", {
+            "name": "Paycheck", "kind": "income", "amount": 2000,
+            "frequency": "biweekly", "start_date": "2026-11-13", "active": True,
+        })
+        self.store.save_item("transactions", {
+            "name": "Plane ticket", "kind": "expense", "amount": 300,
+            "date": "2026-11-10", "status": "planned",
+            "funding_source": "credit", "credit_line_id": card["id"],
+        })
+        result = self.store.projection(date(2026, 11, 8), 2)
+        self.assertEqual(result["balance_before_next_income"], 1000)
+        self.assertEqual(result["balance_before_next_income_after_card_charges"], 700)
+
     def test_sample_import_is_idempotent(self):
         sample = Path(self.temp.name) / "sample.csv"
         sample.write_text(",Nov 5th,,Nov 12th\n,389,,1343\nExpenses,,Expenses,\nRent,/500,Food,100\nexpense subtotal,500,expense subtotal,100\nLeft,111,Left,1243\n", encoding="utf-8")

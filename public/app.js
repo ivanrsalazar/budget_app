@@ -74,7 +74,7 @@ function renderProjection() {
   const p = state.projection;
   const nextPay = p.next_income;
   const cards = [
-    { label: 'Spendable before payday', value: p.balance_before_next_income, note: nextPay ? `Before ${escapeHTML(nextPay.name)} on ${shortDate.format(asUTC(nextPay.date))}` : 'Add recurring income to calculate this', featured: true },
+    { label: 'Spendable before payday', value: p.balance_before_next_income, comparison: p.balance_before_next_income_after_card_charges, note: nextPay ? `Before ${escapeHTML(nextPay.name)} on ${shortDate.format(asUTC(nextPay.date))}` : 'Add recurring income to calculate this', featured: true },
     { label: 'Available now', value: p.starting_balance, note: `Balance set as of ${longDate.format(asUTC(state.settings.balance_as_of))}` },
     { label: 'Lowest point', value: p.lowest_balance, note: p.lowest_balance < 0 ? 'Your plan falls below zero' : 'Across the next 12 weeks' },
     { label: 'In 12 weeks', value: p.ending_balance, note: `Projected on ${longDate.format(asUTC(p.end))}` }
@@ -82,6 +82,7 @@ function renderProjection() {
   $('#metrics').innerHTML = cards.map(card => `<article class="metric-card ${card.featured ? 'metric-featured' : ''}">
     <div class="metric-label">${card.featured ? '◎' : '◇'} ${card.label}</div>
     <div class="metric-value ${card.value < 0 ? 'negative' : ''}">${money.format(card.value)}</div>
+    ${card.comparison != null ? `<div class="metric-comparison"><span>After card charges</span><b class="${card.comparison < 0 ? 'negative' : ''}">${money.format(card.comparison)}</b></div>` : ''}
     <div class="metric-note">${card.note}</div>
   </article>`).join('');
 
@@ -250,16 +251,34 @@ function renderCalendar(gridStart) {
   const eventsByDate = {};
   state.calendarProjection.weeks.flatMap(week => week.events).forEach(event => (eventsByDate[event.date] ||= []).push(event));
   const balancesByDate = {};
+  const balancesAfterCardChargesByDate = {};
+  const cardBalanceAfterPayment = {};
   if (state.calendarBalanceProjection) {
     const balanceEvents = {};
     state.calendarBalanceProjection.weeks.flatMap(week => week.events).forEach(event => (balanceEvents[event.date] ||= []).push(event));
     let runningChecking = state.calendarBalanceProjection.starting_balance;
+    let runningAfterCardCharges = state.calendarBalanceProjection.starting_balance;
+    const runningCardBalances = new Map(state.credit_lines.map(card => [card.id, card.balance]));
     const cursor = asUTC(state.calendarBalanceProjection.start);
     const gridEnd = new Date(gridStart); gridEnd.setUTCDate(gridStart.getUTCDate() + 41);
     while (cursor <= gridEnd) {
       const iso = isoUTC(cursor);
-      runningChecking = Math.round((runningChecking + (balanceEvents[iso] || []).reduce((sum, event) => sum + event.signed_amount, 0)) * 100) / 100;
-      if (cursor >= gridStart) balancesByDate[iso] = runningChecking;
+      for (const event of balanceEvents[iso] || []) {
+        runningChecking = Math.round((runningChecking + event.signed_amount) * 100) / 100;
+        runningAfterCardCharges = Math.round((runningAfterCardCharges + event.signed_amount - (event.funding_source === 'credit' ? event.amount : 0)) * 100) / 100;
+        if (event.funding_source === 'credit' && event.credit_line_id) {
+          runningCardBalances.set(event.credit_line_id, Math.round(((runningCardBalances.get(event.credit_line_id) || 0) + event.amount) * 100) / 100);
+        }
+        if (event.destination_credit_line_id) {
+          const afterPayment = Math.max(0, Math.round(((runningCardBalances.get(event.destination_credit_line_id) || 0) - event.amount) * 100) / 100);
+          runningCardBalances.set(event.destination_credit_line_id, afterPayment);
+          cardBalanceAfterPayment[calendarEventKey(event)] = afterPayment;
+        }
+      }
+      if (cursor >= gridStart) {
+        balancesByDate[iso] = runningChecking;
+        balancesAfterCardChargesByDate[iso] = runningAfterCardCharges;
+      }
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
   }
@@ -270,11 +289,13 @@ function renderCalendar(gridStart) {
     const outside = day.getUTCMonth() !== month.getUTCMonth();
     return `<article class="calendar-day ${outside ? 'outside' : ''} ${iso === today ? 'today' : ''}">
       <span class="day-number">${day.getUTCDate()}</span>
-      <div class="day-events">${events.map(event => `<div class="calendar-event ${event.kind} ${event.funding_source === 'credit' ? 'credit' : ''} ${event.destination_credit_line_id ? 'payment' : ''}" title="${escapeHTML(event.name)} · ${money.format(event.amount)}"><span>${escapeHTML(event.name)}</span><b>${event.kind === 'income' ? '+' : '−'}${money.format(event.amount)}</b></div>`).join('')}</div>
-      <div class="day-balance ${balancesByDate[iso] < 0 ? 'negative' : ''}" title="${balancesByDate[iso] == null ? `Balance projection begins ${state.settings.balance_as_of}` : `Projected end-of-day Checking balance: ${money.format(balancesByDate[iso])}`}"><span>Checking</span><b>${balancesByDate[iso] == null ? '—' : compactMoney.format(balancesByDate[iso])}</b></div>
+      <div class="day-events">${events.map(event => { const afterPayment = cardBalanceAfterPayment[calendarEventKey(event)]; return `<div class="calendar-event ${event.kind} ${event.funding_source === 'credit' ? 'credit' : ''} ${event.destination_credit_line_id ? 'payment' : ''}" tabindex="0" title="${escapeHTML(event.name)} · ${money.format(event.amount)}"><span>${escapeHTML(event.name)}</span><b>${event.kind === 'income' ? '+' : '−'}${money.format(event.amount)}</b>${afterPayment != null ? `<div class="event-tooltip"><span>${escapeHTML(event.destination_credit_line_name)} after payment</span><b>${money.format(afterPayment)}</b></div>` : ''}</div>`; }).join('')}</div>
+      <div class="day-balance ${balancesByDate[iso] < 0 ? 'negative' : ''}" tabindex="0" title="${balancesByDate[iso] == null ? `Balance projection begins ${state.settings.balance_as_of}` : `Projected end-of-day Checking balance: ${money.format(balancesByDate[iso])}`}"><span>Checking</span><b>${balancesByDate[iso] == null ? '—' : compactMoney.format(balancesByDate[iso])}</b>${balancesAfterCardChargesByDate[iso] != null ? `<div class="balance-tooltip"><span>After card charges</span><b class="${balancesAfterCardChargesByDate[iso] < 0 ? 'negative' : ''}">${money.format(balancesAfterCardChargesByDate[iso])}</b></div>` : ''}</div>
     </article>`;
   }).join('');
 }
+
+function calendarEventKey(event) { return `${event.source}:${event.id}:${event.date}`; }
 
 function renderCards() {
   const cards = state.credit_lines;
