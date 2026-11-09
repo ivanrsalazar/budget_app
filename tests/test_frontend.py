@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class FrontendRegressionTests(unittest.TestCase):
     def test_dialog_cancel_controls_never_submit_required_forms(self):
         markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
-        self.assertEqual(markup.count('type="button" data-dialog-close'), 6)
+        self.assertEqual(markup.count('type="button" data-dialog-close'), 8)
         self.assertNotIn('class="icon-button" value="cancel"', markup)
 
     def test_theme_bootstraps_before_styles_and_has_a_toggle(self):
@@ -34,6 +34,16 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('name="funding_account"', markup)
         self.assertIn('class="field wide expense-funding"', markup)
         self.assertIn('name="payment_target"', markup)
+
+    def test_calendar_day_dialog_supports_add_edit_and_delete(self):
+        markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
+        script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="dayDialog"', markup)
+        self.assertIn('id="addDayItem"', markup)
+        self.assertIn('data-calendar-date="${iso}"', script)
+        self.assertIn("function openCalendarDay(dateValue)", script)
+        self.assertIn("openItemDialog('transaction', null, dateValue)", script)
+        self.assertIn("itemActionMenu(type, event)", script)
 
     def test_card_funded_expense_hides_and_clears_payment_destination(self):
         script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")

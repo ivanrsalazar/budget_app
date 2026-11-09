@@ -1,4 +1,4 @@
-const state = { settings: null, recurring: [], transactions: [], credit_lines: [], projection: null, calendarProjection: null, calendarBalanceProjection: null, calendarDate: null, view: 'forecast' };
+const state = { settings: null, recurring: [], transactions: [], credit_lines: [], projection: null, calendarProjection: null, calendarBalanceProjection: null, calendarDate: null, selectedCalendarDate: null, view: 'forecast' };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -165,7 +165,7 @@ function switchView(view) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function openItemDialog(type, item = null) {
+function openItemDialog(type, item = null, presetDate = null) {
   const form = $('#itemForm'); form.reset();
   form.elements.item_type.value = type;
   form.elements.id.value = item?.id || '';
@@ -186,7 +186,7 @@ function openItemDialog(type, item = null) {
   } else {
     form.elements.kind.value = 'expense';
     form.elements.start_date.value = today;
-    form.elements.date.value = today;
+    form.elements.date.value = presetDate || today;
     form.elements.schedule_type.value = 'interval';
     form.elements.frequency.value = 'monthly';
     form.elements.status.value = 'planned';
@@ -292,7 +292,7 @@ function renderCalendar(gridStart) {
     const day = new Date(gridStart); day.setUTCDate(gridStart.getUTCDate() + index);
     const iso = isoUTC(day); const events = eventsByDate[iso] || [];
     const outside = day.getUTCMonth() !== month.getUTCMonth();
-    return `<article class="calendar-day ${outside ? 'outside' : ''} ${iso === today ? 'today' : ''}">
+    return `<article class="calendar-day ${outside ? 'outside' : ''} ${iso === today ? 'today' : ''}" data-calendar-date="${iso}" tabindex="0" role="button" aria-label="Open ${longDate.format(day)}">
       <span class="day-number">${day.getUTCDate()}</span>
       <div class="day-events">${events.map(event => { const afterPayment = cardBalanceAfterPayment[calendarEventKey(event)]; return `<div class="calendar-event ${event.kind} ${event.funding_source === 'credit' ? 'credit' : ''} ${event.destination_credit_line_id ? 'payment' : ''}" tabindex="0" title="${escapeHTML(event.name)} · ${money.format(event.amount)}"><span>${escapeHTML(event.name)}</span><b>${event.kind === 'income' ? '+' : '−'}${money.format(event.amount)}</b>${afterPayment != null ? `<div class="event-tooltip"><span>${escapeHTML(event.destination_credit_line_name)} after payment</span><b>${money.format(afterPayment)}</b></div>` : ''}</div>`; }).join('')}</div>
       <div class="day-balance ${balancesByDate[iso] < 0 ? 'negative' : ''}" tabindex="0" title="${balancesByDate[iso] == null ? `Balance projection begins ${state.settings.balance_as_of}` : `Projected end-of-day Checking balance: ${money.format(balancesByDate[iso])}`}"><span>Checking</span><b>${balancesByDate[iso] == null ? '—' : compactMoney.format(balancesByDate[iso])}</b>${balancesAfterCardChargesByDate[iso] != null ? `<div class="balance-tooltip"><span>After card charges</span><b class="${balancesAfterCardChargesByDate[iso] < 0 ? 'negative' : ''}">${money.format(balancesAfterCardChargesByDate[iso])}</b></div>` : ''}</div>
@@ -301,6 +301,18 @@ function renderCalendar(gridStart) {
 }
 
 function calendarEventKey(event) { return `${event.source}:${event.id}:${event.date}`; }
+
+function openCalendarDay(dateValue) {
+  state.selectedCalendarDate = dateValue;
+  const events = state.calendarProjection.weeks.flatMap(week => week.events).filter(event => event.date === dateValue);
+  $('#dayDialogTitle').textContent = longDate.format(asUTC(dateValue));
+  $('#dayDialogEvents').innerHTML = events.length ? events.map(event => {
+    const type = event.source === 'recurring' ? 'recurring' : 'transaction';
+    const detail = type === 'recurring' ? 'Recurring rule · changes affect every occurrence' : `${event.status} one-time item`;
+    return `<article class="day-dialog-item"><div><b>${escapeHTML(event.name)}</b><span>${detail}</span></div><strong class="${event.kind}">${signed(event.amount, event.kind)}</strong>${itemActionMenu(type, event)}</article>`;
+  }).join('') : '<div class="empty-state">No planned activity on this day.</div>';
+  if (!$('#dayDialog').open) $('#dayDialog').showModal();
+}
 
 function renderCards() {
   const cards = state.credit_lines;
@@ -363,10 +375,13 @@ async function handleItemAction(type, id, action) {
   const item = list.find(candidate => candidate.id === Number(id));
   if (!item) return;
   if (action === 'edit') openItemDialog(type, item);
-  if (action === 'delete' && confirm(`Delete ${item.name}? This cannot be undone.`)) {
+  const deleteMessage = type === 'recurring' ? `Delete the recurring rule ${item.name}? This removes every projected occurrence.` : `Delete ${item.name}? This cannot be undone.`;
+  if (action === 'delete' && confirm(deleteMessage)) {
     try {
       await api(`/api/${type === 'recurring' ? 'recurring' : 'transactions'}/${id}`, { method: 'DELETE' });
-      await refreshAll(); toast(`${item.name} deleted`);
+      await refreshAll();
+      if ($('#dayDialog').open && state.selectedCalendarDate) openCalendarDay(state.selectedCalendarDate);
+      toast(`${item.name} deleted`);
     } catch (error) { toast(error.message, true); }
   }
 }
@@ -400,9 +415,12 @@ document.addEventListener('click', event => {
   const add = event.target.closest('[data-add-type]'); if (add) openItemDialog(add.dataset.addType);
   const action = event.target.closest('[data-item-action]');
   if (action) {
+    if ($('#dayDialog').open && action.dataset.itemAction === 'edit') $('#dayDialog').close();
     if (action.dataset.itemType === 'credit') manageCredit(action.dataset.id, action.dataset.itemAction);
     else handleItemAction(action.dataset.itemType, action.dataset.id, action.dataset.itemAction);
+    return;
   }
+  const calendarDay = event.target.closest('[data-calendar-date]'); if (calendarDay) { openCalendarDay(calendarDay.dataset.calendarDate); return; }
   const week = event.target.closest('.week-summary'); if (week) { const row = week.closest('.week-row'); row.classList.toggle('open'); week.setAttribute('aria-expanded', row.classList.contains('open')); }
 });
 $('#themeToggle').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
@@ -417,8 +435,10 @@ $('#itemForm').addEventListener('submit', saveItem);
 $('#balanceForm').addEventListener('submit', saveBalance);
 $('#creditForm').addEventListener('submit', saveCredit);
 $('#addCreditLine').addEventListener('click', () => openCreditDialog());
+$('#addDayItem').addEventListener('click', () => { const dateValue = state.selectedCalendarDate; $('#dayDialog').close(); openItemDialog('transaction', null, dateValue); });
 $('#previousMonth').addEventListener('click', () => { state.calendarDate.setUTCMonth(state.calendarDate.getUTCMonth() - 1); loadCalendar().catch(error => toast(error.message, true)); });
 $('#nextMonth').addEventListener('click', () => { state.calendarDate.setUTCMonth(state.calendarDate.getUTCMonth() + 1); loadCalendar().catch(error => toast(error.message, true)); });
+$('#calendarGrid').addEventListener('keydown', event => { const day = event.target.closest('[data-calendar-date]'); if (day && ['Enter', ' '].includes(event.key)) { event.preventDefault(); openCalendarDay(day.dataset.calendarDate); } });
 applyTheme(document.documentElement.dataset.theme);
 load();
 
