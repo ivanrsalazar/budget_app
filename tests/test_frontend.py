@@ -57,6 +57,7 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('class="balance-tooltip"', script)
         self.assertIn('class="event-tooltip"', script)
         self.assertIn("cardBalanceAfterPayment", script)
+        self.assertIn("if (day.getUTCDay() === 0) weeklyCardCharges = 0", script)
         self.assertIn(".calendar-event:hover .event-tooltip", styles)
 
     def test_item_actions_use_visible_menu_instead_of_typed_prompt(self):

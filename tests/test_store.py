@@ -169,11 +169,16 @@ class StoreTests(unittest.TestCase):
             "frequency": "biweekly", "start_date": "2026-11-13", "active": True,
         })
         self.store.save_item("transactions", {
+            "name": "Prior-week purchase", "kind": "expense", "amount": 200,
+            "date": "2026-11-03", "status": "planned",
+            "funding_source": "credit", "credit_line_id": card["id"],
+        })
+        self.store.save_item("transactions", {
             "name": "Plane ticket", "kind": "expense", "amount": 300,
             "date": "2026-11-10", "status": "planned",
             "funding_source": "credit", "credit_line_id": card["id"],
         })
-        result = self.store.projection(date(2026, 11, 8), 2)
+        result = self.store.projection(date(2026, 11, 1), 2)
         self.assertEqual(result["balance_before_next_income"], 1000)
         self.assertEqual(result["balance_before_next_income_after_card_charges"], 700)
 

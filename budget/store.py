@@ -431,17 +431,22 @@ class Store:
         lowest = running
         next_income = next((event for event in events if event["kind"] == "income"), None)
         balance_before_next_income = running
-        balance_before_next_income_after_card_charges = running
         for event in events:
             if next_income and event is next_income:
                 break
             running += event["signed_amount"]
             balance_before_next_income = money(running)
-            balance_before_next_income_after_card_charges = money(
-                balance_before_next_income_after_card_charges
-                + event["signed_amount"]
-                - (event["amount"] if event["funding_source"] == "credit" else 0)
-            )
+
+        current_week_end = start + timedelta(days=(5 - start.weekday()) % 7)
+        comparison_cutoff = parse_date(next_income["date"]) if next_income else min(end, current_week_end)
+        comparison_week_start = comparison_cutoff - timedelta(days=(comparison_cutoff.weekday() + 1) % 7)
+        weekly_card_charges = money(sum(
+            event["amount"] for event in events
+            if event["funding_source"] == "credit"
+            and comparison_week_start <= parse_date(event["date"])
+            and (parse_date(event["date"]) < comparison_cutoff if next_income else parse_date(event["date"]) <= comparison_cutoff)
+        ))
+        balance_before_next_income_after_card_charges = money(balance_before_next_income - weekly_card_charges)
 
         running = money(settings["current_balance"])
         week_rows = []

@@ -257,7 +257,6 @@ function renderCalendar(gridStart) {
     const balanceEvents = {};
     state.calendarBalanceProjection.weeks.flatMap(week => week.events).forEach(event => (balanceEvents[event.date] ||= []).push(event));
     let runningChecking = state.calendarBalanceProjection.starting_balance;
-    let runningAfterCardCharges = state.calendarBalanceProjection.starting_balance;
     const runningCardBalances = new Map(state.credit_lines.map(card => [card.id, card.balance]));
     const cursor = asUTC(state.calendarBalanceProjection.start);
     const gridEnd = new Date(gridStart); gridEnd.setUTCDate(gridStart.getUTCDate() + 41);
@@ -265,7 +264,6 @@ function renderCalendar(gridStart) {
       const iso = isoUTC(cursor);
       for (const event of balanceEvents[iso] || []) {
         runningChecking = Math.round((runningChecking + event.signed_amount) * 100) / 100;
-        runningAfterCardCharges = Math.round((runningAfterCardCharges + event.signed_amount - (event.funding_source === 'credit' ? event.amount : 0)) * 100) / 100;
         if (event.funding_source === 'credit' && event.credit_line_id) {
           runningCardBalances.set(event.credit_line_id, Math.round(((runningCardBalances.get(event.credit_line_id) || 0) + event.amount) * 100) / 100);
         }
@@ -277,10 +275,17 @@ function renderCalendar(gridStart) {
       }
       if (cursor >= gridStart) {
         balancesByDate[iso] = runningChecking;
-        balancesAfterCardChargesByDate[iso] = runningAfterCardCharges;
       }
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
+  }
+  let weeklyCardCharges = 0;
+  for (let index = 0; index < 42; index += 1) {
+    const day = new Date(gridStart); day.setUTCDate(gridStart.getUTCDate() + index);
+    const iso = isoUTC(day);
+    if (day.getUTCDay() === 0) weeklyCardCharges = 0;
+    weeklyCardCharges = Math.round((weeklyCardCharges + (eventsByDate[iso] || []).reduce((sum, event) => sum + (event.funding_source === 'credit' ? event.amount : 0), 0)) * 100) / 100;
+    if (balancesByDate[iso] != null) balancesAfterCardChargesByDate[iso] = Math.round((balancesByDate[iso] - weeklyCardCharges) * 100) / 100;
   }
   const today = localISODate();
   $('#calendarGrid').innerHTML = Array.from({ length: 42 }, (_, index) => {
