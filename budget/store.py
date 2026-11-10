@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import calendar
-import csv
-import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -124,7 +122,7 @@ class Store:
         finally:
             connection.close()
 
-    def initialize(self, sample_csv: Path | None = None) -> None:
+    def initialize(self) -> None:
         with self.connect() as db:
             db.executescript(
                 """
@@ -201,14 +199,10 @@ class Store:
             defaults = {
                 "current_balance": "0",
                 "balance_as_of": iso_today(),
-                "sample_imported": "0",
                 "auto_pay_card_charges": "1",
             }
             for key, value in defaults.items():
                 db.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
-
-        if sample_csv and sample_csv.exists():
-            self.import_sample(sample_csv)
 
     def settings(self) -> dict:
         with self.connect() as db:
@@ -216,7 +210,6 @@ class Store:
         return {
             "current_balance": money(values.get("current_balance", 0)),
             "balance_as_of": values.get("balance_as_of", iso_today()),
-            "sample_imported": values.get("sample_imported") == "1",
             "auto_pay_card_charges": values.get("auto_pay_card_charges", "1") == "1",
         }
 
@@ -575,89 +568,6 @@ class Store:
             "weeks": week_rows,
         }
 
-    def import_sample(self, path: Path) -> dict:
-        with self.connect() as db:
-            imported = db.execute("SELECT value FROM settings WHERE key = 'sample_imported'").fetchone()
-            if imported and imported[0] == "1":
-                return {"imported": 0, "skipped": True}
-
-        with path.open(newline="", encoding="utf-8-sig") as source:
-            rows = list(csv.reader(source))
-        if len(rows) < 4:
-            return {"imported": 0, "skipped": True}
-        date_columns = []
-        previous_month = 0
-        year = date.today().year
-        for index in range(0, len(rows[0]), 2):
-            label = rows[0][index].strip() if index < len(rows[0]) else ""
-            if not label and index + 1 < len(rows[0]):
-                label = rows[0][index + 1].strip()
-                if label:
-                    index += 1
-            parsed = parse_sheet_date(label, year)
-            if parsed:
-                if previous_month and parsed.month < previous_month:
-                    year += 1
-                    parsed = parsed.replace(year=year)
-                previous_month = parsed.month
-                date_columns.append((index, parsed))
-
-        # The first row begins with an empty cell, so detect every non-empty date directly.
-        date_columns = []
-        previous_month = 0
-        year = date.today().year
-        for index, label in enumerate(rows[0]):
-            parsed = parse_sheet_date(label.strip(), year)
-            if not parsed:
-                continue
-            if previous_month and parsed.month < previous_month:
-                year += 1
-                parsed = parsed.replace(year=year)
-            previous_month = parsed.month
-            date_columns.append((index, parsed))
-
-        imported_count = 0
-        with self.connect() as db:
-            if date_columns and len(rows) > 1:
-                first_col, first_date = date_columns[0]
-                initial = parse_sheet_amount(rows[1][first_col] if first_col < len(rows[1]) else "")
-                # Prefer the sheet's calculated remainder when present; it represents
-                # spendable cash after that week's listed expenses.
-                for row in rows:
-                    if first_col > 0 and first_col < len(row) and row[first_col - 1].strip().lower() == "left":
-                        remainder = parse_sheet_amount(row[first_col])
-                        if remainder is not None:
-                            initial = remainder
-                        break
-                if initial is not None:
-                    db.execute("UPDATE settings SET value = ? WHERE key = 'current_balance'", (str(initial),))
-                    db.execute("UPDATE settings SET value = ? WHERE key = 'balance_as_of'", (first_date.isoformat(),))
-
-            for amount_col, sheet_date in date_columns:
-                name_col = amount_col - 1
-                for row_index in range(3, max(3, len(rows) - 2)):
-                    row = rows[row_index]
-                    if name_col < 0 or amount_col >= len(row):
-                        continue
-                    name = row[name_col].strip()
-                    amount_text = row[amount_col].strip()
-                    if not name or name.lower() in {"expense subtotal", "left", "expenses"}:
-                        continue
-                    amount = parse_sheet_amount(amount_text)
-                    if amount is None:
-                        continue
-                    key = f"winter-26-27:{sheet_date.isoformat()}:{row_index}:{name.lower()}"
-                    cursor = db.execute(
-                        """INSERT OR IGNORE INTO transactions
-                           (name, kind, amount, date, status, note, source, source_key)
-                           VALUES (?, 'expense', ?, ?, 'planned', ?, 'sample_csv', ?)""",
-                        (name, amount, sheet_date.isoformat(), "Imported from the private winter planning sheet", key),
-                    )
-                    imported_count += cursor.rowcount
-            db.execute("UPDATE settings SET value = '1' WHERE key = 'sample_imported'")
-        return {"imported": imported_count, "skipped": False}
-
-
 def clean_name(value: object) -> str:
     name = str(value or "").strip()
     if not name:
@@ -743,25 +653,4 @@ def event_from_row(row: sqlite3.Row, day: date, source: str) -> dict:
         "destination_credit_line_id": destination_credit_line_id,
         "destination_credit_line_name": destination_credit_line_name,
     }
-
-
-def parse_sheet_date(label: str, year: int) -> date | None:
-    if not label:
-        return None
-    cleaned = label.replace("st", "").replace("nd", "").replace("rd", "").replace("th", "")
-    try:
-        return datetime.strptime(f"{cleaned} {year}", "%b %d %Y").date()
-    except ValueError:
-        return None
-
-
-def parse_sheet_amount(value: str) -> float | None:
-    cleaned = value.strip().replace("$", "").replace(",", "").replace("/", "")
-    if not cleaned:
-        return None
-    try:
-        parsed = money(cleaned)
-        return parsed if parsed >= 0 else None
-    except ValueError:
-        return None
 

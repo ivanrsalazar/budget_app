@@ -14,7 +14,6 @@ from budget.store import Store, parse_date
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / "public"
-DEFAULT_SAMPLE = ROOT / "resources" / "Finances - Winter '26_'27.csv"
 STORE = Store(Path(os.environ.get("BUDGET_DB", ROOT / "data" / "budget.db")))
 
 
@@ -124,8 +123,7 @@ class BudgetHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    sample = Path(os.environ.get("BUDGET_SAMPLE_CSV", DEFAULT_SAMPLE))
-    STORE.initialize(sample)
+    STORE.initialize()
     host = os.environ.get("BUDGET_HOST", "127.0.0.1")
     port = int(os.environ.get("BUDGET_PORT", "8000"))
     server = ThreadingHTTPServer((host, port), BudgetHandler)

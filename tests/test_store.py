@@ -237,17 +237,6 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(disabled["weeks"][0]["events"], [])
         self.assertEqual(disabled["ending_balance"], 1000)
 
-    def test_sample_import_is_idempotent(self):
-        sample = Path(self.temp.name) / "sample.csv"
-        sample.write_text(",Nov 5th,,Nov 12th\n,389,,1343\nExpenses,,Expenses,\nRent,/500,Food,100\nexpense subtotal,500,expense subtotal,100\nLeft,111,Left,1243\n", encoding="utf-8")
-        first = self.store.import_sample(sample)
-        second = self.store.import_sample(sample)
-        self.assertEqual(first["imported"], 2)
-        self.assertTrue(second["skipped"])
-        self.assertEqual(self.store.settings()["current_balance"], 111)
-        self.assertEqual([x["name"] for x in self.store.list_items("transactions")], ["Rent", "Food"])
-
-
 if __name__ == "__main__":
     unittest.main()
 
