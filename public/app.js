@@ -314,12 +314,13 @@ function openCalendarDay(dateValue) {
   const events = state.calendarProjection.weeks.flatMap(week => week.events).filter(event => event.date === dateValue);
   $('#dayDialogTitle').textContent = longDate.format(asUTC(dateValue));
   $('#dayDialogEvents').innerHTML = events.length ? events.map(event => {
+    const note = event.note ? `<p class="day-item-note">${escapeHTML(event.note)}</p>` : '';
     if (event.source === 'auto_card_payment') {
-      return `<article class="day-dialog-item automatic"><div><b>${escapeHTML(event.name)}</b><span>Automatic Monday payoff · controlled by the view toggle</span></div><strong class="expense">${signed(event.amount, event.kind)}</strong></article>`;
+      return `<article class="day-dialog-item automatic"><div><b>${escapeHTML(event.name)}</b><span>Automatic Monday payoff · controlled by the view toggle</span>${note}</div><strong class="expense">${signed(event.amount, event.kind)}</strong></article>`;
     }
     const type = event.source === 'recurring' ? 'recurring' : 'transaction';
     const detail = type === 'recurring' ? 'Recurring rule · changes affect every occurrence' : `${event.status} one-time item`;
-    return `<article class="day-dialog-item"><div><b>${escapeHTML(event.name)}</b><span>${detail}</span></div><strong class="${event.kind}">${signed(event.amount, event.kind)}</strong>${itemActionMenu(type, event)}</article>`;
+    return `<article class="day-dialog-item"><div><b>${escapeHTML(event.name)}</b><span>${detail}</span>${note}</div><strong class="${event.kind}">${signed(event.amount, event.kind)}</strong>${itemActionMenu(type, event)}</article>`;
   }).join('') : '<div class="empty-state">No planned activity on this day.</div>';
   if (!$('#dayDialog').open) $('#dayDialog').showModal();
 }

@@ -45,6 +45,14 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn("openItemDialog('transaction', null, dateValue)", script)
         self.assertIn("itemActionMenu(type, event)", script)
 
+    def test_calendar_day_dialog_shows_item_notes(self):
+        script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("event.note ?", script)
+        self.assertIn('class="day-item-note"', script)
+        self.assertIn("escapeHTML(event.note)", script)
+        self.assertIn(".day-dialog-item .day-item-note", styles)
+
     def test_card_funded_expense_hides_and_clears_payment_destination(self):
         script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
         self.assertIn("const paidFromChecking = form.elements.funding_account.value === 'checking'", script)
