@@ -65,6 +65,31 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(result["weeks"][1]["expenses"], 100)
         self.assertEqual(result["ending_balance"], 2550)
 
+    def test_projection_rolls_balance_forward_and_keeps_current_week_history(self):
+        self.store.save_item("transactions", {
+            "name": "Misc.", "kind": "expense", "amount": 24.44,
+            "date": "2026-11-09", "status": "posted",
+        })
+        self.store.save_item("recurring_items", {
+            "name": "Paycheck", "kind": "income", "amount": 1276,
+            "frequency": "weekly", "start_date": "2026-11-12", "active": True,
+        })
+
+        result = self.store.projection(date(2026, 11, 9), 2, date(2026, 11, 10))
+        self.assertEqual(result["through"], "2026-11-10")
+        self.assertEqual(result["available_balance"], 975.56)
+        self.assertEqual(result["balance_before_next_income"], 975.56)
+        self.assertEqual(result["weeks"][0]["events"][0]["name"], "Misc.")
+        self.assertEqual(result["weeks"][0]["opening_balance"], 1000)
+
+        later_window = self.store.projection(date(2026, 11, 10), 1, date(2026, 11, 10))
+        self.assertEqual(later_window["starting_balance"], 975.56)
+
+        self.store.update_settings({"current_balance": 975.56, "balance_as_of": "2026-11-10"})
+        full_week = self.store.projection(date(2026, 11, 9), 1, date(2026, 11, 10))
+        self.assertEqual(full_week["starting_balance"], 1000)
+        self.assertEqual(full_week["available_balance"], 975.56)
+
     def test_crud_and_pause_recurring_item(self):
         item = self.store.save_item("recurring_items", {
             "name": "Rent", "kind": "expense", "amount": 1600,

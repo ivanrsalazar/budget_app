@@ -25,6 +25,7 @@ function localISODate() {
 }
 function isoUTC(value) { return value.toISOString().slice(0, 10); }
 function asUTC(value) { return new Date(`${value}T00:00:00Z`); }
+function mondayOfWeek(value) { const day = asUTC(value); day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7)); return isoUTC(day); }
 function escapeHTML(value) { const el = document.createElement('div'); el.textContent = String(value ?? ''); return el.innerHTML; }
 function signed(value, kind) { return `${kind === 'income' ? '+' : '−'}${money.format(value)}`; }
 function frequencyLabel(value) { return ({ weekly: 'Weekly', biweekly: 'Every 2 weeks', monthly: 'Monthly', quarterly: 'Every 3 months', yearly: 'Yearly' })[value] || value; }
@@ -66,8 +67,9 @@ async function load() {
 }
 
 async function loadProjection() {
-  const start = $('#forecastStart').value || localISODate();
-  state.projection = await api(`/api/projection?start=${start}&weeks=12`);
+  const through = $('#forecastStart').value || localISODate();
+  const start = mondayOfWeek(through);
+  state.projection = await api(`/api/projection?start=${start}&through=${through}&weeks=12`);
   renderProjection();
 }
 
@@ -76,7 +78,7 @@ function renderProjection() {
   const nextPay = p.next_income;
   const cards = [
     { label: 'Spendable before payday', value: p.balance_before_next_income, comparison: p.balance_before_next_income_after_card_charges, note: nextPay ? `Before ${escapeHTML(nextPay.name)} on ${shortDate.format(asUTC(nextPay.date))}` : 'Add recurring income to calculate this', featured: true },
-    { label: 'Available now', value: p.starting_balance, note: `Balance set as of ${longDate.format(asUTC(state.settings.balance_as_of))}` },
+    { label: 'Available now', value: p.available_balance, note: `Through ${longDate.format(asUTC(p.through))} · balance set ${longDate.format(asUTC(state.settings.balance_as_of))}` },
     { label: 'Lowest point', value: p.lowest_balance, note: p.lowest_balance < 0 ? 'Your plan falls below zero' : 'Across the next 12 weeks' },
     { label: 'In 12 weeks', value: p.ending_balance, note: `Projected on ${longDate.format(asUTC(p.end))}` }
   ];

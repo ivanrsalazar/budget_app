@@ -34,8 +34,9 @@ class BudgetHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/projection":
                 query = parse_qs(parsed.query)
                 start = parse_date(query.get("start", [date.today().isoformat()])[0])
+                through = parse_date(query.get("through", [start.isoformat()])[0])
                 weeks = int(query.get("weeks", ["12"])[0])
-                self.json_response(STORE.projection(start, weeks))
+                self.json_response(STORE.projection(start, weeks, through))
             elif parsed.path.startswith("/api/"):
                 self.error_response(HTTPStatus.NOT_FOUND, "API route not found")
             else:

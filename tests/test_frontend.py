@@ -99,6 +99,12 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('<i class="dot charge"></i>Card charge', markup := (ROOT / "public" / "index.html").read_text(encoding="utf-8"))
         self.assertIn('<i class="dot payment"></i>Card payment', markup)
 
+    def test_forecast_uses_full_current_week_and_selected_day_balance(self):
+        script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("function mondayOfWeek(value)", script)
+        self.assertIn("through=${through}", script)
+        self.assertIn("value: p.available_balance", script)
+
     def test_item_actions_use_visible_menu_instead_of_typed_prompt(self):
         script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
         styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")

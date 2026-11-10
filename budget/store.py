@@ -388,11 +388,14 @@ class Store:
             if cursor.rowcount == 0:
                 raise KeyError("Item not found")
 
-    def projection(self, start: date, weeks: int = 12) -> dict:
+    def projection(self, start: date, weeks: int = 12, through: date | None = None) -> dict:
         weeks = max(1, min(52, weeks))
         end = start + timedelta(days=weeks * 7 - 1)
+        through = max(start, min(through or start, end))
         settings = self.settings()
-        source_start = start - timedelta(days=7) if settings["auto_pay_card_charges"] else start
+        balance_date = parse_date(settings["balance_as_of"])
+        calculation_start = min(start, balance_date)
+        source_start = calculation_start - timedelta(days=7) if settings["auto_pay_card_charges"] else calculation_start
         events: list[dict] = []
 
         with self.connect() as db:
@@ -446,7 +449,7 @@ class Store:
                 weekly_charges[key] = money(weekly_charges.get(key, 0) + event["amount"])
             for (card_id, week_start), amount in weekly_charges.items():
                 payment_day = week_start + timedelta(days=7)
-                if not (start <= payment_day <= end) or amount <= 0:
+                if not (calculation_start <= payment_day <= end) or amount <= 0:
                     continue
                 card = cards_by_id.get(card_id)
                 if not card:
@@ -468,24 +471,43 @@ class Store:
                     "destination_credit_line_name": card["name"],
                 })
 
-        events = [event for event in events if start.isoformat() <= event["date"] <= end.isoformat()]
-
         events.sort(key=lambda item: (
             item["date"],
             0 if item["kind"] == "income" else 1 if item["source"] == "auto_card_payment" else 2,
             item["name"].lower(),
         ))
-        running = money(settings["current_balance"])
+        starting_balance = money(settings["current_balance"])
+        if balance_date < start:
+            starting_balance = money(starting_balance + sum(
+                event["signed_amount"] for event in events
+                if balance_date.isoformat() <= event["date"] < start.isoformat()
+            ))
+        elif balance_date > start:
+            starting_balance = money(starting_balance - sum(
+                event["signed_amount"] for event in events
+                if start.isoformat() <= event["date"] < balance_date.isoformat()
+            ))
+
+        events = [event for event in events if start.isoformat() <= event["date"] <= end.isoformat()]
+        available_balance = money(starting_balance + sum(
+            event["signed_amount"] for event in events if event["date"] <= through.isoformat()
+        ))
+        running = available_balance
         lowest = running
-        next_income = next((event for event in events if event["kind"] == "income"), None)
+        next_income = next((
+            event for event in events
+            if event["kind"] == "income" and event["date"] > through.isoformat()
+        ), None)
         balance_before_next_income = running
         for event in events:
+            if event["date"] <= through.isoformat():
+                continue
             if next_income and event is next_income:
                 break
             running += event["signed_amount"]
             balance_before_next_income = money(running)
 
-        current_week_end = start + timedelta(days=(6 - start.weekday()) % 7)
+        current_week_end = through + timedelta(days=(6 - through.weekday()) % 7)
         comparison_cutoff = parse_date(next_income["date"]) if next_income else min(end, current_week_end)
         comparison_week_start = comparison_cutoff - timedelta(days=comparison_cutoff.weekday())
         weekly_card_charges = money(sum(
@@ -496,7 +518,7 @@ class Store:
         ))
         balance_before_next_income_after_card_charges = money(balance_before_next_income - weekly_card_charges)
 
-        running = money(settings["current_balance"])
+        running = starting_balance
         week_rows = []
         for index in range(weeks):
             week_start = start + timedelta(days=index * 7)
@@ -541,7 +563,9 @@ class Store:
         return {
             "start": start.isoformat(),
             "end": end.isoformat(),
-            "starting_balance": settings["current_balance"],
+            "through": through.isoformat(),
+            "starting_balance": starting_balance,
+            "available_balance": available_balance,
             "ending_balance": running,
             "lowest_balance": money(lowest),
             "next_income": next_income,
