@@ -31,6 +31,7 @@ Select a day to add a one-time payment or review, edit, and delete planned activ
 
 - Schedule income and expenses weekly, biweekly, monthly, quarterly, or yearly.
 - Schedule activity on a weekday or an ordinal weekday, such as the third Thursday of every month.
+- Edit one recurring occurrence without changing its rule, or apply an edit to that occurrence and every one after it.
 - Add one-time planned or posted income and expenses.
 - Assign purchases to Checking or a saved credit line.
 - Direct payments to a credit line so they reduce its projected balance.

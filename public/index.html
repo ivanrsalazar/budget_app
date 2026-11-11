@@ -129,30 +129,36 @@
       </div>
       <input type="hidden" name="id">
       <input type="hidden" name="item_type">
+      <input type="hidden" name="occurrence_date">
       <div class="type-toggle" role="group" aria-label="Money direction">
         <label><input type="radio" name="kind" value="income"><span>↓ Money in</span></label>
         <label><input type="radio" name="kind" value="expense" checked><span>↑ Money out</span></label>
       </div>
+      <fieldset class="occurrence-scope hidden">
+        <legend>Apply these changes to</legend>
+        <label><input type="radio" name="edit_scope" value="instance" checked><span><b>This occurrence only</b><small>Keep the recurring rule unchanged</small></span></label>
+        <label><input type="radio" name="edit_scope" value="future"><span><b>This and future occurrences</b><small>Keep earlier occurrences unchanged</small></span></label>
+      </fieldset>
       <label class="field wide">Name<input name="name" required maxlength="100" placeholder="e.g. Paycheck or Rent"></label>
-      <div class="field-row">
+      <div class="field-row amount-schedule-row">
         <label class="field">Amount<span class="money-input"><b>$</b><input name="amount" type="number" min="0.01" step="0.01" required placeholder="0.00"></span></label>
-        <label class="field recurring-only">Schedule<select name="schedule_type" id="scheduleType"><option value="interval">Fixed interval</option><option value="weekday">Every selected weekday</option><option value="nth_weekday">Nth weekday of each month</option></select></label>
+        <label class="field recurring-only future-scope-only">Schedule<select name="schedule_type" id="scheduleType"><option value="interval">Fixed interval</option><option value="weekday">Every selected weekday</option><option value="nth_weekday">Nth weekday of each month</option></select></label>
         <label class="field transaction-only">Status<select name="status"><option value="planned">Planned</option><option value="posted">Posted</option></select></label>
       </div>
-      <div class="field-row recurring-only schedule-details">
+      <div class="field-row recurring-only schedule-details future-scope-only">
         <label class="field schedule-interval">Repeats<select name="frequency"><option value="weekly">Every week</option><option value="biweekly">Every 2 weeks</option><option value="monthly" selected>Every month</option><option value="quarterly">Every 3 months</option><option value="yearly">Every year</option></select></label>
         <label class="field schedule-weekday">Day of week<select name="weekday"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3" selected>Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select></label>
         <label class="field schedule-nth">Week of month<select name="ordinal"><option value="1">First</option><option value="2">Second</option><option value="3" selected>Third</option><option value="4">Fourth</option><option value="-1">Last</option></select></label>
       </div>
       <div class="field-row">
-        <label class="field recurring-only">Starts<input name="start_date" type="date"></label>
-        <label class="field recurring-only">Ends <small>optional</small><input name="end_date" type="date"></label>
+        <label class="field recurring-only future-scope-only">Starts<input name="start_date" type="date"></label>
+        <label class="field recurring-only future-scope-only">Ends <small>optional</small><input name="end_date" type="date"></label>
         <label class="field transaction-only">Date<input name="date" type="date"></label>
       </div>
       <label class="field wide expense-funding">Paid from<select name="funding_account" id="fundingAccount"><option value="checking">Checking</option></select><small class="field-help">Purchases charged to a card increase that card’s projected balance without reducing Checking.</small></label>
       <label class="field wide expense-target">Payment destination<select name="payment_target" id="paymentTarget"><option value="none">Regular expense — no card balance reduction</option></select><small class="field-help">Choose a credit line when this is a card payment. The payment leaves Checking and reduces that card’s projected balance.</small></label>
       <label class="field wide">Note <small>optional</small><textarea name="note" rows="2" maxlength="500" placeholder="Anything useful to remember"></textarea></label>
-      <label class="active-check recurring-only"><input type="checkbox" name="active" checked><span>Include this item in forecasts</span></label>
+      <label class="active-check recurring-only future-scope-only"><input type="checkbox" name="active" checked><span>Include this item in forecasts</span></label>
       <div class="dialog-actions"><button class="button button-ghost" type="button" data-dialog-close>Cancel</button><button class="button button-primary" type="submit" value="default">Save item</button></div>
     </form>
   </dialog>

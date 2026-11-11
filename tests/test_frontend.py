@@ -43,7 +43,7 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('data-calendar-date="${iso}"', script)
         self.assertIn("function openCalendarDay(dateValue)", script)
         self.assertIn("openItemDialog('transaction', null, dateValue)", script)
-        self.assertIn("itemActionMenu(type, event)", script)
+        self.assertIn("itemActionMenu(type, event, type === 'recurring' ? event.date : null)", script)
 
     def test_calendar_day_dialog_shows_item_notes(self):
         script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
@@ -104,6 +104,15 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn("function mondayOfWeek(value)", script)
         self.assertIn("through=${through}", script)
         self.assertIn("value: p.available_balance", script)
+
+    def test_recurring_occurrences_can_be_edited_by_scope_from_both_views(self):
+        markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
+        script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('value="instance" checked', markup)
+        self.assertIn('value="future"', markup)
+        self.assertIn("itemActionMenu('recurring', event, event.date, true)", script)
+        self.assertIn("data-occurrence-date", script)
+        self.assertIn("/occurrences/${data.occurrence_date}", script)
 
     def test_item_actions_use_visible_menu_instead_of_typed_prompt(self):
         script = (ROOT / "public" / "app.js").read_text(encoding="utf-8")

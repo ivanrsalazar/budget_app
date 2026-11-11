@@ -63,6 +63,21 @@ class BudgetHandler(BaseHTTPRequestHandler):
                 return
 
             parts = [part for part in path.split("/") if part]
+            if (
+                len(parts) == 5
+                and parts[:2] == ["api", "recurring"]
+                and parts[3] == "occurrences"
+                and method == "PUT"
+            ):
+                item_id = int(parts[2])
+                occurrence_date = parse_date(parts[4])
+                self.json_response(STORE.save_recurring_occurrence(
+                    item_id,
+                    occurrence_date,
+                    payload,
+                    payload.get("edit_scope", "instance"),
+                ))
+                return
             if len(parts) not in {2, 3} or parts[0] != "api" or parts[1] not in {"recurring", "transactions", "credit-lines"}:
                 self.error_response(HTTPStatus.NOT_FOUND, "API route not found")
                 return

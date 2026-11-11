@@ -174,6 +174,20 @@ class Store:
                     note TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS recurring_overrides (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recurring_item_id INTEGER NOT NULL REFERENCES recurring_items(id) ON DELETE CASCADE,
+                    occurrence_date TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    kind TEXT NOT NULL CHECK(kind IN ('income', 'expense')),
+                    amount REAL NOT NULL CHECK(amount >= 0),
+                    funding_source TEXT NOT NULL DEFAULT 'checking',
+                    credit_line_id INTEGER REFERENCES credit_lines(id) ON DELETE SET NULL,
+                    destination_credit_line_id INTEGER REFERENCES credit_lines(id) ON DELETE SET NULL,
+                    note TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(recurring_item_id, occurrence_date)
+                );
                 """
             )
             recurring_columns = {row["name"] for row in db.execute("PRAGMA table_info(recurring_items)")}
@@ -235,51 +249,7 @@ class Store:
 
     def save_item(self, table: str, payload: dict, item_id: int | None = None) -> dict:
         if table == "recurring_items":
-            schedule_type = validate_choice(
-                payload.get("schedule_type", "interval"),
-                {"interval", "weekday", "nth_weekday"},
-                "schedule type",
-            )
-            weekday = validate_optional_int(payload.get("weekday"), range(7), "weekday") if schedule_type != "interval" else None
-            ordinal = validate_optional_int(payload.get("ordinal"), {-1, 1, 2, 3, 4}, "ordinal") if schedule_type == "nth_weekday" else None
-            if schedule_type != "interval" and weekday is None:
-                raise ValueError("A weekday is required for this schedule")
-            if schedule_type == "nth_weekday" and ordinal is None:
-                raise ValueError("An ordinal week is required for this schedule")
-            frequency = payload.get("frequency", "monthly")
-            if schedule_type == "weekday":
-                frequency = "weekly"
-            elif schedule_type == "nth_weekday":
-                frequency = "monthly"
-            kind = validate_choice(payload.get("kind"), {"income", "expense"}, "kind")
-            funding_source = validate_choice(payload.get("funding_source", "checking"), {"checking", "credit"}, "funding source")
-            credit_line_id = parse_optional_id(payload.get("credit_line_id")) if funding_source == "credit" else None
-            destination_credit_line_id = parse_optional_id(payload.get("destination_credit_line_id"))
-            if kind == "income":
-                funding_source = "checking"
-                credit_line_id = None
-                destination_credit_line_id = None
-            elif destination_credit_line_id is not None:
-                funding_source = "checking"
-                credit_line_id = None
-            if funding_source == "credit" and credit_line_id is None:
-                raise ValueError("Choose a credit line for this expense")
-            values = {
-                "name": clean_name(payload.get("name")),
-                "kind": kind,
-                "amount": validate_amount(payload.get("amount")),
-                "frequency": validate_choice(frequency, {"weekly", "biweekly", "monthly", "quarterly", "yearly"}, "frequency"),
-                "schedule_type": schedule_type,
-                "weekday": weekday,
-                "ordinal": ordinal,
-                "funding_source": funding_source,
-                "credit_line_id": credit_line_id,
-                "destination_credit_line_id": destination_credit_line_id,
-                "start_date": parse_date(payload.get("start_date", "")).isoformat(),
-                "end_date": parse_date(payload["end_date"]).isoformat() if payload.get("end_date") else None,
-                "active": 1 if payload.get("active", True) else 0,
-                "note": str(payload.get("note", "")).strip()[:500],
-            }
+            values = normalize_recurring_payload(payload)
             fields = list(values)
         elif table == "transactions":
             kind = validate_choice(payload.get("kind"), {"income", "expense"}, "kind")
@@ -356,6 +326,79 @@ class Store:
             row = db.execute(f"SELECT * FROM {table} WHERE id = ?", (item_id,)).fetchone()
             return dict(row)
 
+    def save_recurring_occurrence(self, item_id: int, occurrence_date: date, payload: dict, scope: str) -> dict:
+        scope = validate_choice(scope, {"instance", "future"}, "edit scope")
+        values = normalize_recurring_payload(payload)
+        with self.connect() as db:
+            item = db.execute("SELECT * FROM recurring_items WHERE id = ?", (item_id,)).fetchone()
+            if not item:
+                raise KeyError("Recurring item not found")
+            item_end = parse_date(item["end_date"]) if item["end_date"] else occurrence_date
+            valid_occurrence = next(iter(scheduled_occurrences(
+                parse_date(item["start_date"]),
+                item["frequency"],
+                item["schedule_type"],
+                item["weekday"],
+                item["ordinal"],
+                occurrence_date,
+                min(occurrence_date, item_end),
+            )), None)
+            if valid_occurrence != occurrence_date:
+                raise ValueError("That date is not an occurrence of this recurring item")
+            validate_linked_cards(db, values)
+
+            if scope == "instance":
+                override_fields = [
+                    "name", "kind", "amount", "funding_source", "credit_line_id",
+                    "destination_credit_line_id", "note",
+                ]
+                assignments = ", ".join(f"{field} = excluded.{field}" for field in override_fields)
+                db.execute(
+                    f"""INSERT INTO recurring_overrides
+                        (recurring_item_id, occurrence_date, {', '.join(override_fields)})
+                        VALUES (?, ?, {', '.join('?' for _ in override_fields)})
+                        ON CONFLICT(recurring_item_id, occurrence_date) DO UPDATE SET {assignments}""",
+                    (item_id, occurrence_date.isoformat(), *[values[field] for field in override_fields]),
+                )
+                row = db.execute(
+                    "SELECT * FROM recurring_overrides WHERE recurring_item_id = ? AND occurrence_date = ?",
+                    (item_id, occurrence_date.isoformat()),
+                ).fetchone()
+                return {"scope": scope, "item": dict(row)}
+
+            values["start_date"] = occurrence_date.isoformat()
+            if values["end_date"] and parse_date(values["end_date"]) < occurrence_date:
+                raise ValueError("The end date cannot be before this occurrence")
+            db.execute(
+                "DELETE FROM recurring_overrides WHERE recurring_item_id = ? AND occurrence_date = ?",
+                (item_id, occurrence_date.isoformat()),
+            )
+            fields = list(values)
+            if occurrence_date == parse_date(item["start_date"]):
+                assignments = ", ".join(f"{field} = ?" for field in fields)
+                db.execute(
+                    f"UPDATE recurring_items SET {assignments} WHERE id = ?",
+                    (*[values[field] for field in fields], item_id),
+                )
+                new_id = item_id
+            else:
+                db.execute(
+                    "UPDATE recurring_items SET end_date = ? WHERE id = ?",
+                    ((occurrence_date - timedelta(days=1)).isoformat(), item_id),
+                )
+                cursor = db.execute(
+                    f"INSERT INTO recurring_items ({', '.join(fields)}) VALUES ({', '.join('?' for _ in fields)})",
+                    tuple(values[field] for field in fields),
+                )
+                new_id = cursor.lastrowid
+                db.execute(
+                    """UPDATE recurring_overrides SET recurring_item_id = ?
+                       WHERE recurring_item_id = ? AND occurrence_date > ?""",
+                    (new_id, item_id, occurrence_date.isoformat()),
+                )
+            row = db.execute("SELECT * FROM recurring_items WHERE id = ?", (new_id,)).fetchone()
+            return {"scope": scope, "item": dict(row)}
+
     def delete_item(self, table: str, item_id: int) -> None:
         if table not in {"recurring_items", "transactions", "credit_lines"}:
             raise ValueError("Invalid item type")
@@ -371,6 +414,14 @@ class Store:
                 )
                 db.execute(
                     """UPDATE transactions
+                       SET funding_source = CASE WHEN credit_line_id = ? THEN 'checking' ELSE funding_source END,
+                           credit_line_id = CASE WHEN credit_line_id = ? THEN NULL ELSE credit_line_id END,
+                           destination_credit_line_id = CASE WHEN destination_credit_line_id = ? THEN NULL ELSE destination_credit_line_id END
+                       WHERE credit_line_id = ? OR destination_credit_line_id = ?""",
+                    (item_id, item_id, item_id, item_id, item_id),
+                )
+                db.execute(
+                    """UPDATE recurring_overrides
                        SET funding_source = CASE WHEN credit_line_id = ? THEN 'checking' ELSE funding_source END,
                            credit_line_id = CASE WHEN credit_line_id = ? THEN NULL ELSE credit_line_id END,
                            destination_credit_line_id = CASE WHEN destination_credit_line_id = ? THEN NULL ELSE destination_credit_line_id END
@@ -410,6 +461,19 @@ class Store:
                    WHERE date BETWEEN ? AND ? ORDER BY date, transactions.id""",
                 (source_start.isoformat(), end.isoformat()),
             ).fetchall()
+            overrides = db.execute(
+                """SELECT recurring_overrides.*, source_card.name AS credit_line_name,
+                          target_card.name AS destination_credit_line_name
+                   FROM recurring_overrides
+                   LEFT JOIN credit_lines AS source_card ON source_card.id = recurring_overrides.credit_line_id
+                   LEFT JOIN credit_lines AS target_card ON target_card.id = recurring_overrides.destination_credit_line_id
+                   WHERE occurrence_date BETWEEN ? AND ?""",
+                (source_start.isoformat(), end.isoformat()),
+            ).fetchall()
+
+        overrides_by_occurrence = {
+            (row["recurring_item_id"], row["occurrence_date"]): row for row in overrides
+        }
 
         for row in recurring:
             item_start = parse_date(row["start_date"])
@@ -425,7 +489,13 @@ class Store:
                 source_start,
                 item_end,
             ):
-                events.append(event_from_row(row, occurrence, "recurring"))
+                override = overrides_by_occurrence.get((row["id"], occurrence.isoformat()))
+                event = event_from_row(override or row, occurrence, "recurring")
+                event["id"] = row["id"]
+                event["recurring_item_id"] = row["id"]
+                event["occurrence_date"] = occurrence.isoformat()
+                event["is_override"] = override is not None
+                events.append(event)
 
         for row in transactions:
             events.append(event_from_row(row, parse_date(row["date"]), "transaction"))
@@ -626,6 +696,65 @@ def validate_optional_int(value: object, choices: Iterable[int], field: str) -> 
     if parsed not in choices:
         raise ValueError(f"Invalid {field}")
     return parsed
+
+
+def normalize_recurring_payload(payload: dict) -> dict:
+    schedule_type = validate_choice(
+        payload.get("schedule_type", "interval"),
+        {"interval", "weekday", "nth_weekday"},
+        "schedule type",
+    )
+    weekday = validate_optional_int(payload.get("weekday"), range(7), "weekday") if schedule_type != "interval" else None
+    ordinal = validate_optional_int(payload.get("ordinal"), {-1, 1, 2, 3, 4}, "ordinal") if schedule_type == "nth_weekday" else None
+    if schedule_type != "interval" and weekday is None:
+        raise ValueError("A weekday is required for this schedule")
+    if schedule_type == "nth_weekday" and ordinal is None:
+        raise ValueError("An ordinal week is required for this schedule")
+    frequency = payload.get("frequency", "monthly")
+    if schedule_type == "weekday":
+        frequency = "weekly"
+    elif schedule_type == "nth_weekday":
+        frequency = "monthly"
+    kind = validate_choice(payload.get("kind"), {"income", "expense"}, "kind")
+    funding_source = validate_choice(payload.get("funding_source", "checking"), {"checking", "credit"}, "funding source")
+    credit_line_id = parse_optional_id(payload.get("credit_line_id")) if funding_source == "credit" else None
+    destination_credit_line_id = parse_optional_id(payload.get("destination_credit_line_id"))
+    if kind == "income":
+        funding_source = "checking"
+        credit_line_id = None
+        destination_credit_line_id = None
+    elif destination_credit_line_id is not None:
+        funding_source = "checking"
+        credit_line_id = None
+    if funding_source == "credit" and credit_line_id is None:
+        raise ValueError("Choose a credit line for this expense")
+    return {
+        "name": clean_name(payload.get("name")),
+        "kind": kind,
+        "amount": validate_amount(payload.get("amount")),
+        "frequency": validate_choice(frequency, {"weekly", "biweekly", "monthly", "quarterly", "yearly"}, "frequency"),
+        "schedule_type": schedule_type,
+        "weekday": weekday,
+        "ordinal": ordinal,
+        "funding_source": funding_source,
+        "credit_line_id": credit_line_id,
+        "destination_credit_line_id": destination_credit_line_id,
+        "start_date": parse_date(payload.get("start_date", "")).isoformat(),
+        "end_date": parse_date(payload["end_date"]).isoformat() if payload.get("end_date") else None,
+        "active": 1 if payload.get("active", True) else 0,
+        "note": str(payload.get("note", "")).strip()[:500],
+    }
+
+
+def validate_linked_cards(db: sqlite3.Connection, values: dict) -> None:
+    if values["funding_source"] == "credit":
+        linked = db.execute("SELECT id FROM credit_lines WHERE id = ?", (values["credit_line_id"],)).fetchone()
+        if not linked:
+            raise ValueError("The selected credit line no longer exists")
+    if values.get("destination_credit_line_id") is not None:
+        target = db.execute("SELECT id FROM credit_lines WHERE id = ?", (values["destination_credit_line_id"],)).fetchone()
+        if not target:
+            raise ValueError("The selected payment destination no longer exists")
 
 
 def event_from_row(row: sqlite3.Row, day: date, source: str) -> dict:

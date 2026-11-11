@@ -45,6 +45,14 @@ function updateScheduleFields() {
   $$('.schedule-nth', form).forEach(el => el.classList.toggle('hidden', type !== 'nth_weekday'));
 }
 
+function updateOccurrenceScopeFields() {
+  const form = $('#itemForm');
+  if (form.elements.item_type.value !== 'recurring') return;
+  const instanceOnly = Boolean(form.elements.occurrence_date.value) && form.elements.edit_scope.value === 'instance';
+  form.classList.toggle('instance-edit', instanceOnly);
+  $$('.future-scope-only', form).forEach(el => el.classList.toggle('hidden', instanceOnly));
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
   const data = await response.json();
@@ -94,10 +102,11 @@ function renderProjection() {
     const events = week.events.map(event => {
       eventCheckingBalance = Math.round((eventCheckingBalance + event.signed_amount) * 100) / 100;
       const cardClass = event.funding_source === 'credit' ? 'card-charge' : event.destination_credit_line_id ? 'card-payment' : '';
+      const occurrenceActions = event.source === 'recurring' ? itemActionMenu('recurring', event, event.date, true) : '';
       return `<div class="event ${cardClass}">
         <span class="event-date">${weekday.format(asUTC(event.date))}, ${shortDate.format(asUTC(event.date))}</span>
-        <span><b>${escapeHTML(event.name)}</b><br><span class="event-source">${event.source === 'auto_card_payment' ? `Automatic Monday payoff · Checking to ${escapeHTML(event.destination_credit_line_name)}` : event.destination_credit_line_id ? `Payment to ${escapeHTML(event.destination_credit_line_name)}` : event.funding_source === 'credit' ? `Charged to ${escapeHTML(event.credit_line_name)}` : event.source === 'recurring' ? 'From Checking · Recurring' : event.status}</span></span>
-        <span class="event-amount-block"><b class="event-amount ${event.kind} ${cardClass}">${signed(event.amount, event.kind)}</b><small class="event-checking ${eventCheckingBalance < 0 ? 'negative' : ''}">Checking ${money.format(eventCheckingBalance)}</small></span>
+        <span><b>${escapeHTML(event.name)}</b><br><span class="event-source">${event.source === 'auto_card_payment' ? `Automatic Monday payoff · Checking to ${escapeHTML(event.destination_credit_line_name)}` : event.destination_credit_line_id ? `Payment to ${escapeHTML(event.destination_credit_line_name)}` : event.funding_source === 'credit' ? `Charged to ${escapeHTML(event.credit_line_name)}` : event.source === 'recurring' ? `From Checking · Recurring${event.is_override ? ' · Edited occurrence' : ''}` : event.status}</span></span>
+        <span class="event-actions"><span class="event-amount-block"><b class="event-amount ${event.kind} ${cardClass}">${signed(event.amount, event.kind)}</b><small class="event-checking ${eventCheckingBalance < 0 ? 'negative' : ''}">Checking ${money.format(eventCheckingBalance)}</small></span>${occurrenceActions}</span>
       </div>`;
     }).join('') || '<div class="empty-week">No planned activity this week.</div>';
     return `<article class="week-row ${index === 0 ? 'open' : ''}">
@@ -160,8 +169,10 @@ function renderPlanItems(items, type) {
   }).join('');
 }
 
-function itemActionMenu(type, item) {
-  return `<div class="item-menu"><button class="kebab" type="button" aria-label="Actions for ${escapeHTML(item.name)}" aria-haspopup="menu">•••</button><div class="action-menu" role="menu"><button type="button" role="menuitem" data-item-action="edit" data-item-type="${type}" data-id="${item.id}">Edit</button><button type="button" role="menuitem" class="danger" data-item-action="delete" data-item-type="${type}" data-id="${item.id}">Delete</button></div></div>`;
+function itemActionMenu(type, item, occurrenceDate = null, editOnly = false) {
+  const occurrence = occurrenceDate ? ` data-occurrence-date="${occurrenceDate}"` : '';
+  const deleteAction = editOnly ? '' : `<button type="button" role="menuitem" class="danger" data-item-action="delete" data-item-type="${type}" data-id="${item.id}">Delete</button>`;
+  return `<div class="item-menu"><button class="kebab" type="button" aria-label="Actions for ${escapeHTML(item.name)}" aria-haspopup="menu">•••</button><div class="action-menu" role="menu"><button type="button" role="menuitem" data-item-action="edit" data-item-type="${type}" data-id="${item.id}"${occurrence}>Edit</button>${deleteAction}</div></div>`;
 }
 
 function switchView(view) {
@@ -173,15 +184,19 @@ function switchView(view) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function openItemDialog(type, item = null, presetDate = null) {
+function openItemDialog(type, item = null, presetDate = null, occurrenceDate = null) {
   const form = $('#itemForm'); form.reset();
+  form.classList.remove('instance-edit');
   form.elements.item_type.value = type;
   form.elements.id.value = item?.id || '';
+  form.elements.occurrence_date.value = occurrenceDate || '';
   const recurring = type === 'recurring';
+  const editingOccurrence = recurring && Boolean(item && occurrenceDate);
   $$('.recurring-only', form).forEach(el => el.classList.toggle('hidden', !recurring));
   $$('.transaction-only', form).forEach(el => el.classList.toggle('hidden', recurring));
+  $$('.occurrence-scope', form).forEach(el => el.classList.toggle('hidden', !editingOccurrence));
   $('#dialogEyebrow').textContent = item ? 'UPDATE PLAN ITEM' : 'NEW PLAN ITEM';
-  $('#dialogTitle').textContent = `${item ? 'Edit' : 'Add'} ${recurring ? 'recurring' : 'one-time'} item`;
+  $('#dialogTitle').textContent = editingOccurrence ? `Edit ${longDate.format(asUTC(occurrenceDate))}` : `${item ? 'Edit' : 'Add'} ${recurring ? 'recurring' : 'one-time'} item`;
   const today = localISODate();
   if (item) {
     for (const [key, value] of Object.entries(item)) {
@@ -191,6 +206,7 @@ function openItemDialog(type, item = null, presetDate = null) {
     }
     form.elements.funding_account.value = item.funding_source === 'credit' ? `credit:${item.credit_line_id}` : 'checking';
     form.elements.payment_target.value = item.destination_credit_line_id ? `credit:${item.destination_credit_line_id}` : 'none';
+    if (editingOccurrence) form.elements.edit_scope.value = 'instance';
   } else {
     form.elements.kind.value = 'expense';
     form.elements.start_date.value = today;
@@ -203,6 +219,7 @@ function openItemDialog(type, item = null, presetDate = null) {
     form.elements.payment_target.value = 'none';
   }
   updateScheduleFields();
+  updateOccurrenceScopeFields();
   updateFundingField();
   $('#itemDialog').showModal();
 }
@@ -221,7 +238,10 @@ async function saveItem(event) {
   data.credit_line_id = funding.startsWith('credit:') ? Number(funding.split(':')[1]) : null;
   const route = type === 'recurring' ? 'recurring' : 'transactions';
   try {
-    await api(`/api/${route}${data.id ? `/${data.id}` : ''}`, { method: data.id ? 'PUT' : 'POST', body: JSON.stringify(data) });
+    const occurrenceRoute = type === 'recurring' && data.id && data.occurrence_date
+      ? `/api/recurring/${data.id}/occurrences/${data.occurrence_date}`
+      : null;
+    await api(occurrenceRoute || `/api/${route}${data.id ? `/${data.id}` : ''}`, { method: data.id ? 'PUT' : 'POST', body: JSON.stringify(data) });
     $('#itemDialog').close();
     await refreshAll();
     toast(`${data.name} saved`);
@@ -321,8 +341,8 @@ function openCalendarDay(dateValue) {
       return `<article class="day-dialog-item automatic"><div><b>${escapeHTML(event.name)}</b><span>Automatic Monday payoff · controlled by the view toggle</span>${note}</div><strong class="expense">${signed(event.amount, event.kind)}</strong></article>`;
     }
     const type = event.source === 'recurring' ? 'recurring' : 'transaction';
-    const detail = type === 'recurring' ? 'Recurring rule · changes affect every occurrence' : `${event.status} one-time item`;
-    return `<article class="day-dialog-item"><div><b>${escapeHTML(event.name)}</b><span>${detail}</span>${note}</div><strong class="${event.kind}">${signed(event.amount, event.kind)}</strong>${itemActionMenu(type, event)}</article>`;
+    const detail = type === 'recurring' ? `Recurring occurrence${event.is_override ? ' · individually edited' : ''}` : `${event.status} one-time item`;
+    return `<article class="day-dialog-item"><div><b>${escapeHTML(event.name)}</b><span>${detail}</span>${note}</div><strong class="${event.kind}">${signed(event.amount, event.kind)}</strong>${itemActionMenu(type, event, type === 'recurring' ? event.date : null)}</article>`;
   }).join('') : '<div class="empty-state">No planned activity on this day.</div>';
   if (!$('#dayDialog').open) $('#dayDialog').showModal();
 }
@@ -383,11 +403,24 @@ async function manageCredit(id, action) {
   }
 }
 
-async function handleItemAction(type, id, action) {
+function findRecurringOccurrence(id, occurrenceDate) {
+  for (const projection of [state.calendarProjection, state.projection]) {
+    const event = projection?.weeks.flatMap(week => week.events).find(candidate =>
+      candidate.source === 'recurring' && candidate.id === Number(id) && candidate.date === occurrenceDate
+    );
+    if (event) return event;
+  }
+  return null;
+}
+
+async function handleItemAction(type, id, action, occurrenceDate = null) {
   const list = type === 'recurring' ? state.recurring : state.transactions;
   const item = list.find(candidate => candidate.id === Number(id));
   if (!item) return;
-  if (action === 'edit') openItemDialog(type, item);
+  if (action === 'edit') {
+    const occurrence = type === 'recurring' && occurrenceDate ? findRecurringOccurrence(id, occurrenceDate) : null;
+    openItemDialog(type, occurrence ? { ...item, ...occurrence } : item, null, occurrence ? occurrenceDate : null);
+  }
   const deleteMessage = type === 'recurring' ? `Delete the recurring rule ${item.name}? This removes every projected occurrence.` : `Delete ${item.name}? This cannot be undone.`;
   if (action === 'delete' && confirm(deleteMessage)) {
     try {
@@ -448,7 +481,7 @@ document.addEventListener('click', event => {
   if (action) {
     if ($('#dayDialog').open && action.dataset.itemAction === 'edit') $('#dayDialog').close();
     if (action.dataset.itemType === 'credit') manageCredit(action.dataset.id, action.dataset.itemAction);
-    else handleItemAction(action.dataset.itemType, action.dataset.id, action.dataset.itemAction);
+    else handleItemAction(action.dataset.itemType, action.dataset.id, action.dataset.itemAction, action.dataset.occurrenceDate || null);
     return;
   }
   const calendarDay = event.target.closest('[data-calendar-date]'); if (calendarDay) { openCalendarDay(calendarDay.dataset.calendarDate); return; }
@@ -460,6 +493,7 @@ $('#adjustBalance').addEventListener('click', openBalanceDialog);
 $('#forecastStart').addEventListener('change', () => loadProjection().catch(error => toast(error.message, true)));
 $$('[data-auto-pay-toggle]').forEach(toggle => toggle.addEventListener('change', () => setAutoPay(toggle.checked)));
 $('#scheduleType').addEventListener('change', updateScheduleFields);
+$$('input[name="edit_scope"]', $('#itemForm')).forEach(input => input.addEventListener('change', updateOccurrenceScopeFields));
 $('#paymentTarget').addEventListener('change', updateFundingField);
 $('#fundingAccount').addEventListener('change', updateFundingField);
 $$('input[name="kind"]', $('#itemForm')).forEach(input => input.addEventListener('change', updateFundingField));

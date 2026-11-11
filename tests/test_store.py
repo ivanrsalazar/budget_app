@@ -103,6 +103,44 @@ class StoreTests(unittest.TestCase):
         self.store.delete_item("recurring_items", item["id"])
         self.assertEqual(self.store.list_items("recurring_items"), [])
 
+    def test_editing_one_recurring_occurrence_creates_an_override(self):
+        item = self.store.save_item("recurring_items", {
+            "name": "Weekly bill", "kind": "expense", "amount": 100,
+            "frequency": "weekly", "start_date": "2026-11-09", "active": True,
+        })
+        edited = {**item, "name": "Adjusted bill", "amount": 175, "note": "One week only"}
+        result = self.store.save_recurring_occurrence(item["id"], date(2026, 11, 16), edited, "instance")
+        self.assertEqual(result["scope"], "instance")
+
+        projection = self.store.projection(date(2026, 11, 9), 3)
+        events = [event for week in projection["weeks"] for event in week["events"]]
+        self.assertEqual([event["amount"] for event in events], [100, 175, 100])
+        self.assertEqual(events[1]["name"], "Adjusted bill")
+        self.assertTrue(events[1]["is_override"])
+        self.assertFalse(events[0]["is_override"])
+        self.assertEqual(self.store.list_items("recurring_items")[0]["amount"], 100)
+
+    def test_editing_future_occurrences_splits_the_recurring_rule(self):
+        item = self.store.save_item("recurring_items", {
+            "name": "Weekly bill", "kind": "expense", "amount": 100,
+            "frequency": "weekly", "start_date": "2026-11-09", "active": True,
+        })
+        self.store.save_recurring_occurrence(
+            item["id"], date(2026, 11, 16), {**item, "amount": 175}, "instance",
+        )
+        edited = {**item, "name": "New weekly bill", "amount": 150}
+        result = self.store.save_recurring_occurrence(item["id"], date(2026, 11, 16), edited, "future")
+        self.assertEqual(result["scope"], "future")
+
+        rules = self.store.list_items("recurring_items")
+        self.assertEqual(len(rules), 2)
+        self.assertEqual(rules[0]["end_date"], "2026-11-15")
+        self.assertEqual(rules[1]["start_date"], "2026-11-16")
+        projection = self.store.projection(date(2026, 11, 9), 3)
+        events = [event for week in projection["weeks"] for event in week["events"]]
+        self.assertEqual([event["amount"] for event in events], [100, 150, 150])
+        self.assertEqual([event["name"] for event in events], ["Weekly bill", "New weekly bill", "New weekly bill"])
+
     def test_nth_weekday_item_projects_on_requested_day(self):
         item = self.store.save_item("recurring_items", {
             "name": "Rent", "kind": "expense", "amount": 1600,
